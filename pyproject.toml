@@ -1,0 +1,59 @@
+[project]
+name = "mech-cad-design-agent"
+version = "0.7.1"
+description = "AI mechanical CAD design, validation, reusable knowledge, and MCP tools for coding agents"
+readme = "README.md"
+authors = [{ name = "Sanat Pednekar", email = "sanatmphjs@gmail.com" }]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.3.0,<2",
+    "psycopg[binary]>=3.2.0,<4",
+    "pywin32>=312; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+neo4j = ["neo4j>=5.28.0,<7"]
+
+[dependency-groups]
+test = [
+    "jsonschema>=4.23.0,<5",
+    "pyyaml>=6.0,<7",
+    "pytest>=8.3.0,<10",
+]
+
+[project.scripts]
+mech-cad-design-mcp = "mech_cad_design_agent.server:main"
+mech-cad-design = "mech_cad_design_agent.cli:main"
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mech_cad_design_agent"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src/mech_cad_design_agent",
+    ".env.example",
+    "compose.yaml",
+    "THIRD_PARTY_NOTICES.md",
+    "third-party-components.toml",
+    "docs/ARCHITECTURE.md",
+    "docs/DATABASE_DEPLOYMENT.md",
+    "docs/ENGINEER_LEARNING_PLAYBOOK.md",
+    "docs/FREECAD_GUI_MCP_INTEGRATION.md",
+    "docs/OPENCODE_INTEGRATION.md",
+    "docs/WINDOWS_RELEASE_ACCEPTANCE.md",
+    "examples/product_families/example-family.json",
+]
+
+[tool.pyright]
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+markers = [
+    "live_database: requires the explicitly isolated disposable database harness",
+]

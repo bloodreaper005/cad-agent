@@ -1,0 +1,118 @@
+schema_version = "PublicRepositoryAllowlist/v1"
+
+root_files = [
+  ".env.example",
+  ".gitignore",
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "LICENSE",
+  "NOTICE",
+  "README.md",
+  "THIRD_PARTY_NOTICES.md",
+  "compose.yaml",
+  "public-repository.toml",
+  "pyproject.toml",
+  "third-party-components.toml",
+  "uv.lock",
+]
+
+public_docs = [
+  ".agents/skills/README.md",
+  "docs/ARCHITECTURE.md",
+  "docs/DATABASE_DEPLOYMENT.md",
+  "docs/ENGINEER_LEARNING_PLAYBOOK.md",
+  "docs/FREECAD_GUI_MCP_INTEGRATION.md",
+  "docs/OPENCODE_INTEGRATION.md",
+  "docs/WINDOWS_RELEASE_ACCEPTANCE.md",
+  "docs/assets/mech-cad-design-agent-architecture-v2.png",
+  "docs/assets/mech-cad-design-showcase.gif",
+]
+
+source_trees = [
+  ".agents/skills/freecad-model-validation",
+  ".agents/skills/freecad-standard-parts",
+  ".agents/skills/mech-cad-design",
+  "examples/product_families",
+  "src/mech_cad_design_agent",
+]
+
+public_tests = [
+  "tests/conftest.py",
+  "tests/database_deployment_helpers.py",
+  "tests/freecad_gui_mcp_live_helpers.py",
+  "tests/freecad_gui_mcp_provenance.py",
+  "tests/public_release_helpers.py",
+  "tests/test_agent_skills.py",
+  "tests/test_approval_semantics.py",
+  "tests/test_assembly.py",
+  "tests/test_bootstrap_diagnostics.py",
+  "tests/test_boundaries.py",
+  "tests/test_database_deployment.py",
+  "tests/test_database_deployment_live.py",
+  "tests/test_design_confirmation.py",
+  "tests/test_design_knowledge.py",
+  "tests/test_design_lesson_repository.py",
+  "tests/test_design_mcp.py",
+  "tests/test_design_session.py",
+  "tests/test_fcstd_security.py",
+  "tests/test_freecad_gui_mcp_integration_live.py",
+  "tests/test_freecad_packaging.py",
+  "tests/test_freecad_runner.py",
+  "tests/test_knowledge_matching.py",
+  "tests/test_long_term_knowledge_database.py",
+  "tests/test_long_term_knowledge_migration.py",
+  "tests/test_long_term_knowledge_target.py",
+  "tests/test_migrations.py",
+  "tests/test_package_resources.py",
+  "tests/test_packaging.py",
+  "tests/test_product_family_knowledge.py",
+  "tests/test_projection.py",
+  "tests/test_public_distribution.py",
+  "tests/test_public_documentation.py",
+  "tests/test_public_release_contract.py",
+  "tests/test_secure_fs_pinned_cleanup.py",
+  "tests/test_simplified_knowledge_migration_cli.py",
+  "tests/test_simplified_knowledge_repository.py",
+  "tests/test_simplified_knowledge_schema.py",
+  "tests/test_standard_part_cli.py",
+  "tests/test_standard_part_configuration.py",
+  "tests/test_standard_part_packaging.py",
+  "tests/test_standard_parts.py",
+  "tests/test_third_party_licensing.py",
+  "tests/test_tool_profiles.py",
+  "tests/test_windows_freecad_discovery.py",
+  "tests/test_windows_freecad_gui_mcp_live.py",
+  "tests/test_windows_packaging.py",
+  "tests/test_windows_portability.py",
+  "tests/test_windows_release_evidence.py",
+  "tests/test_windows_secure_fs.py",
+  "tests/test_workspace_bootstrap.py",
+  "tests/third_party_licensing_helpers.py",
+  "tests/windows_freecad_gui_mcp_live_helpers.py",
+  "tests/windows_release_helpers.py",
+]
+
+public_ci = [
+  ".github/workflows/windows.yml",
+]
+
+public_scripts = [
+  "scripts/windows_database_deployment_acceptance.ps1",
+  "scripts/windows_release_acceptance.ps1",
+]
+
+excluded_private_paths = [
+  "config/product_families",
+  "docs/superpowers",
+  "scripts/run_external_step_validation.py",
+  "tests/test_bootstrap_runtime.py",
+  "tests/test_bootstrap_slice2_packaging.py",
+  "tests/test_bootstrap_slice3_packaging.py",
+  "tests/test_documentation.py",
+  "tests/test_private_public_release_gate.py",
+  "tests/test_runtime_hardcode_packaging.py",
+  "tests/test_smoke_runtime.py",
+  "tests/test_workspace_bootstrap_packaging.py",
+]
+
+compatibility_paths = []

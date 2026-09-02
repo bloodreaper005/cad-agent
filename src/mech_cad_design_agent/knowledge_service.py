@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from .approval_semantics import APPROVE, classify_approval
+from .knowledge_matching import applicability_matches
+from .product_family_knowledge import ProductFamilyKnowledgeService
+
+
+class KnowledgeService:
+    """Application service for durable engineering knowledge administration."""
+
+    def __init__(self, repository: object, projection: object, workspace: object) -> None:
+        self.repository = repository
+        self.projection = projection
+        self.families = ProductFamilyKnowledgeService(workspace, repository)
+
+    def product_family_onboarding_start(self, **request: object) -> dict[str, object]:
+        return self.families.start(request)
+
+    def product_family_onboarding_analyze(
+        self, *, onboarding_id: str, analysis: Mapping[str, object] | None = None
+    ) -> dict[str, object]:
+        return self.families.analyze(onboarding_id, analysis or {"assertions": []})
+
+    def product_family_onboarding_review(
+        self,
+        *,
+        onboarding_id: str,
+        decision_text: str,
+        review: Mapping[str, object],
+    ) -> dict[str, object]:
+        return self.families.review(onboarding_id, decision_text, review)
+
+    def product_family_onboarding_publish(
+        self, *, onboarding_id: str
+    ) -> dict[str, object]:
+        return self.families.publish(onboarding_id)
+
+    def product_family_onboarding_status(
+        self, *, onboarding_id: str
+    ) -> dict[str, object]:
+        return self.families.status(onboarding_id)
+
+    def design_context_build(
+        self,
+        *,
+        organization_id: str,
+        design_group_id: str,
+        requested_family_id: object,
+        design_features: Mapping[str, object],
+        lesson_query: str,
+    ) -> dict[str, object]:
+        scope = getattr(self.repository, "scope", None)
+        if (
+            scope is None
+            or scope.organization_id != organization_id
+            or scope.design_group_id != design_group_id
+        ):
+            raise ValueError("requested knowledge scope does not match repository scope")
+        family = self.repository.match_product_family(
+            query=lesson_query,
+            design_features=design_features,
+            requested_family_id=(
+                str(requested_family_id) if requested_family_id else None
+            ),
+        )
+        result = self.repository.search(
+            query=lesson_query,
+            product_family_id=(
+                str(family["id"]) if family else None
+            ),
+        )
+        applicable_assertions = [
+            row
+            for row in result["assertions"]
+            if applicability_matches(row.get("applicability") or {}, design_features)
+        ]
+        applicable_lessons = [
+            row
+            for row in result["lessons"]
+            if applicability_matches(row.get("applicability") or {}, design_features)
+        ]
+        return {
+            "schema_version": "DesignContext/v2",
+            "hard_constraints": [],
+            "preferences": [],
+            "approved_facts": applicable_assertions,
+            "specialized_knowledge": [family] if family else [],
+            "approved_design_lessons": applicable_lessons,
+            "similar_models": [],
+        }
+
+    def knowledge_search(
+        self, *, query: str, filters: Mapping[str, object]
+    ) -> dict[str, object]:
+        return self.repository.search(
+            query=query,
+            product_family_id=(
+                str(filters["product_family_id"])
+                if filters.get("product_family_id")
+                else None
+            ),
+            limit=int(filters.get("limit", 20)),
+        )
+
+    def design_lesson_search(
+        self, *, query: str, features: Mapping[str, object], limit: int
+    ) -> dict[str, object]:
+        return self.repository.search(
+            query=query,
+            product_family_id=(
+                str(features["product_family_id"])
+                if features.get("product_family_id")
+                else None
+            ),
+            limit=limit,
+        )
+
+    def design_lesson_get(self, *, lesson_id: str) -> dict[str, object]:
+        return self.repository.get_design_lesson(lesson_id)
+
+    def design_lesson_supersede(
+        self,
+        *,
+        lesson_id: str,
+        replacement_lesson_id: str,
+        decision_text: str,
+    ) -> dict[str, object]:
+        decision = classify_approval(decision_text)
+        if decision != APPROVE:
+            return {
+                "decision_state": decision,
+                "status": "not_changed",
+            }
+        return self.repository.set_design_lesson_status(
+            lesson_id=lesson_id,
+            status="superseded",
+            replacement_lesson_id=replacement_lesson_id,
+        )
+
+    def design_lesson_revoke(
+        self, *, lesson_id: str, decision_text: str
+    ) -> dict[str, object]:
+        decision = classify_approval(decision_text)
+        if decision != APPROVE:
+            return {
+                "decision_state": decision,
+                "status": "not_changed",
+            }
+        return self.repository.set_design_lesson_status(
+            lesson_id=lesson_id, status="revoked"
+        )
+
+    def publish_design_lesson_review(self, **kwargs: object) -> dict[str, object]:
+        return self.repository.publish_design_lesson_review(**kwargs)
+
+    def projection_rebuild(self, *, decision_text: str) -> dict[str, object]:
+        if classify_approval(decision_text) != APPROVE:
+            return {"status": "not_rebuilt", "decision_state": classify_approval(decision_text)}
+        return self.projection.rebuild(self.repository)
+
+
+__all__ = ["KnowledgeService"]

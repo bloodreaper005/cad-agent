@@ -1,0 +1,16 @@
+{
+  "aliases": [
+    "example product line"
+  ],
+  "design_group_id": "example-design-group",
+  "family_id": "example-family",
+  "family_name": "Example Product Family",
+  "onboarding_id": "example-family-onboarding",
+  "organization_id": "example-org",
+  "source_references": [
+    {
+      "identity": "example-model-collection",
+      "kind": "reviewed-cad-set"
+    }
+  ]
+}

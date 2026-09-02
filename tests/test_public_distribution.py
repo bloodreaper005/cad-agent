@@ -1,0 +1,399 @@
+from __future__ import annotations
+
+import email.policy
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import tomllib
+import zipfile
+from email.parser import BytesParser
+from pathlib import Path, PurePosixPath
+
+import pytest
+from packaging.requirements import Requirement
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LICENSE_SHA256 = "40fcf3d63cd45ddb33e44baade6943a78122632d2133810e63ff6bb53aa161a3"
+COMPOSE_SHA256 = "a06361a997e1d2c11e23efd0b967efae624ce5b72f2f569032f65782192833d6"
+EXPECTED_DEPENDENCIES = [
+    "mcp[cli]>=1.3.0,<2",
+    "psycopg[binary]>=3.2.0,<4",
+    "pywin32>=312; sys_platform == 'win32'",
+]
+EXPECTED_OPTIONAL_DEPENDENCIES = {"neo4j": ["neo4j>=5.28.0,<7"]}
+EXPECTED_SCRIPTS = {
+    "mech-cad-design": "mech_cad_design_agent.cli:main",
+    "mech-cad-design-mcp": "mech_cad_design_agent.server:main",
+}
+CLEAN_ENVIRONMENT_KEYS = {
+    "PYTHONPATH",
+    "MECH_DESIGN_WORKSPACE",
+    "MECH_DESIGN_ENV_FILE",
+    "MECH_DESIGN_ACTOR_ID",
+    "MECH_DESIGN_DATABASE_URL",
+    "MECH_DESIGN_NEO4J_URI",
+    "MECH_DESIGN_NEO4J_USER",
+    "MECH_DESIGN_NEO4J_PASSWORD",
+    "MECH_DESIGN_FREECADCMD",
+    "MECH_DESIGN_ARTIFACT_ROOT",
+    "MECH_DESIGN_PRODUCT_FAMILY_ID",
+    "MECH_DESIGN_FAMILY_CONFIG",
+    "MECH_DESIGN_MCP_TOOL_PROFILE",
+}
+
+
+def clean_environment(root: Path) -> dict[str, str]:
+    environment = dict(os.environ)
+    environment["HOME"] = str(root / "home")
+    environment.setdefault("UV_CACHE_DIR", str(root / "uv-cache"))
+    for name in CLEAN_ENVIRONMENT_KEYS:
+        environment.pop(name, None)
+    return environment
+
+
+def run(
+    command: list[str],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    timeout: int = 300,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+@pytest.fixture(scope="module")
+def built_artifacts() -> tuple[Path, Path, Path]:
+    uv = shutil.which("uv")
+    assert uv is not None
+    temporary = tempfile.TemporaryDirectory(prefix="public-distribution-")
+    root = Path(temporary.name)
+    (root / "home").mkdir()
+    dist = root / "dist"
+    result = run(
+        [uv, "build", "--out-dir", str(dist)],
+        cwd=PROJECT_ROOT,
+        environment=clean_environment(root),
+    )
+    assert result.returncode == 0, result.stderr
+    wheel = next(dist.glob("*.whl"))
+    sdist = next(dist.glob("*.tar.gz"))
+    yield root, wheel, sdist
+    temporary.cleanup()
+
+
+def test_public_metadata_and_license_contract() -> None:
+    project = tomllib.loads(
+        (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    assert project["name"] == "mech-cad-design-agent"
+    assert project["version"] == "0.7.1"
+    assert project["description"] == (
+        "AI mechanical CAD design, validation, reusable knowledge, and MCP "
+        "tools for coding agents"
+    )
+    assert project["license"] == "Apache-2.0"
+    assert project["license-files"] == ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
+    assert project["requires-python"] == ">=3.12"
+    assert project["dependencies"] == EXPECTED_DEPENDENCIES
+    assert project["optional-dependencies"] == EXPECTED_OPTIONAL_DEPENDENCIES
+    assert project["scripts"] == EXPECTED_SCRIPTS
+
+    license_bytes = (PROJECT_ROOT / "LICENSE").read_bytes()
+    assert hashlib.sha256(license_bytes).hexdigest() == LICENSE_SHA256
+
+
+def test_release_version_is_exactly_0_7_1_everywhere() -> None:
+    expected = "0.7.1"
+    project = tomllib.loads(
+        (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    lock = tomllib.loads((PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8"))
+    package = next(
+        item
+        for item in lock["package"]
+        if item["name"] == "mech-cad-design-agent"
+    )
+    third_party = tomllib.loads(
+        (PROJECT_ROOT / "third-party-components.toml").read_text(encoding="utf-8")
+    )
+    init_text = (
+        PROJECT_ROOT / "src" / "mech_cad_design_agent" / "__init__.py"
+    ).read_text(encoding="utf-8")
+
+    assert project["version"] == expected
+    assert package["version"] == expected
+    assert third_party["project_version"] == expected
+    assert f'__version__ = "{expected}"' in init_text
+    assert f"## {expected} -" in (PROJECT_ROOT / "CHANGELOG.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def _normalized_sdist_members(sdist: Path) -> tuple[str, ...]:
+    with tarfile.open(sdist, "r:gz") as archive:
+        files = [member.name for member in archive.getmembers() if member.isfile()]
+    assert all("\\" not in name for name in files)
+    posix_files = [PurePosixPath(name) for name in files]
+    roots = {name.parts[0] for name in posix_files}
+    assert len(roots) == 1
+    root = next(iter(roots))
+    return tuple(
+        sorted(name.relative_to(root).as_posix() for name in posix_files)
+    )
+
+
+def test_sdist_has_strict_public_release_contents(
+    built_artifacts: tuple[Path, Path, Path],
+) -> None:
+    _, _, sdist = built_artifacts
+    members = _normalized_sdist_members(sdist)
+    exact = {
+        ".env.example",
+        ".gitignore",
+        "LICENSE",
+        "NOTICE",
+        "PKG-INFO",
+        "README.md",
+        "THIRD_PARTY_NOTICES.md",
+        "compose.yaml",
+        "pyproject.toml",
+        "third-party-components.toml",
+        "docs/ARCHITECTURE.md",
+        "docs/DATABASE_DEPLOYMENT.md",
+        "docs/ENGINEER_LEARNING_PLAYBOOK.md",
+        "docs/FREECAD_GUI_MCP_INTEGRATION.md",
+        "docs/OPENCODE_INTEGRATION.md",
+        "docs/WINDOWS_RELEASE_ACCEPTANCE.md",
+        "examples/product_families/example-family.json",
+    }
+    for member in members:
+        assert member in exact or member.startswith("src/mech_cad_design_agent/"), member
+    assert exact <= set(members)
+    assert not any(member.startswith("tests/") for member in members)
+    assert "compose.yaml" in members
+    assert "public-repository.toml" not in members
+    assert "uv.lock" not in members
+
+
+def test_sdist_compose_matches_d3_accepted_bytes(
+    built_artifacts: tuple[Path, Path, Path],
+) -> None:
+    _, wheel, sdist = built_artifacts
+    with tarfile.open(sdist, "r:gz") as archive:
+        compose_member = next(
+            member for member in archive.getmembers() if member.name.endswith("/compose.yaml")
+        )
+        extracted = archive.extractfile(compose_member)
+        assert extracted is not None
+        packaged_compose = extracted.read()
+    assert packaged_compose == (PROJECT_ROOT / "compose.yaml").read_bytes()
+    assert hashlib.sha256(packaged_compose).hexdigest() == COMPOSE_SHA256
+    with zipfile.ZipFile(wheel) as archive:
+        assert "compose.yaml" not in archive.namelist()
+
+
+def test_wheel_metadata_license_and_entrypoints(
+    built_artifacts: tuple[Path, Path, Path],
+) -> None:
+    _, wheel, _ = built_artifacts
+    with zipfile.ZipFile(wheel) as archive:
+        names = archive.namelist()
+        metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+        entry_name = next(
+            name for name in names if name.endswith(".dist-info/entry_points.txt")
+        )
+        license_names = [name for name in names if ".dist-info/licenses/" in name]
+        metadata = BytesParser(policy=email.policy.default).parsebytes(
+            archive.read(metadata_name)
+        )
+        entrypoints = archive.read(entry_name).decode("utf-8")
+        assert {Path(name).name for name in license_names} == {
+            "LICENSE",
+            "NOTICE",
+            "THIRD_PARTY_NOTICES.md",
+        }
+        packaged_license = archive.read(
+            next(name for name in license_names if name.endswith("/LICENSE"))
+        )
+        packaged_notices = archive.read(
+            next(
+                name
+                for name in license_names
+                if name.endswith("/THIRD_PARTY_NOTICES.md")
+            )
+        )
+        assert "third-party-components.toml" not in names
+
+    assert metadata["Name"] == "mech-cad-design-agent"
+    assert metadata["Version"] == "0.7.1"
+    assert metadata["Summary"] == (
+        "AI mechanical CAD design, validation, reusable knowledge, and MCP "
+        "tools for coding agents"
+    )
+    assert metadata["License-Expression"] == "Apache-2.0"
+    assert metadata["Requires-Python"] == ">=3.12"
+    requirements = {Requirement(value) for value in metadata.get_all("Requires-Dist")}
+    assert {item for item in requirements if item.marker is None or "extra" not in str(item.marker)} == {
+        Requirement(value) for value in EXPECTED_DEPENDENCIES
+    }
+    assert any(
+        item.name == "neo4j"
+        and item.marker is not None
+        and item.marker.evaluate({"extra": "neo4j"})
+        for item in requirements
+    )
+    assert "mech-cad-design = mech_cad_design_agent.cli:main" in entrypoints
+    assert "mech-cad-design-mcp = mech_cad_design_agent.server:main" in entrypoints
+    assert hashlib.sha256(packaged_license).hexdigest() == LICENSE_SHA256
+    assert packaged_notices == (PROJECT_ROOT / "THIRD_PARTY_NOTICES.md").read_bytes()
+
+
+def test_artifacts_exclude_vendor_and_third_party_payloads(
+    built_artifacts: tuple[Path, Path, Path],
+) -> None:
+    _, wheel, sdist = built_artifacts
+    with zipfile.ZipFile(wheel) as archive:
+        wheel_members = tuple(archive.namelist())
+    sdist_members = _normalized_sdist_members(sdist)
+    for members in (wheel_members, sdist_members):
+        lowered = tuple(member.lower() for member in members)
+        assert not any(member.startswith("vendor/") for member in lowered)
+        assert not any(".gitmodules" in member for member in lowered)
+        assert not any("freecad_fastenerswb" in member for member in lowered)
+        assert not any("freecad.gears" in member for member in lowered)
+        assert not any("freecad-mcp" in member for member in lowered)
+        assert not any(member.endswith((".fcstd", ".step", ".stp", ".stl")) for member in lowered)
+        assert not any("/designs/" in f"/{member.strip('/').lower()}/" for member in members)
+
+
+def _wheel_runtime_hashes(wheel: Path) -> dict[str, str]:
+    with zipfile.ZipFile(wheel) as archive:
+        selected = sorted(
+            name
+            for name in archive.namelist()
+            if name.startswith("mech_cad_design_agent/")
+            or name.endswith(".dist-info/entry_points.txt")
+        )
+        return {
+            name: hashlib.sha256(archive.read(name)).hexdigest() for name in selected
+        }
+
+
+def test_sdist_rebuilds_and_imports_without_repository_access(
+    built_artifacts: tuple[Path, Path, Path],
+) -> None:
+    root, source_wheel, sdist = built_artifacts
+    uv = shutil.which("uv")
+    assert uv is not None
+    extracted_root = root / "extracted"
+    rebuilt_dist = root / "rebuilt-dist"
+    venv = root / "venv"
+    outside = root / "outside-repository"
+    outside.mkdir()
+    with tarfile.open(sdist, "r:gz") as archive:
+        archive.extractall(extracted_root, filter="data")
+    source = next(extracted_root.iterdir())
+    environment = clean_environment(root)
+
+    rebuilt = run(
+        [uv, "build", "--wheel", "--out-dir", str(rebuilt_dist)],
+        cwd=source,
+        environment=environment,
+    )
+    assert rebuilt.returncode == 0, rebuilt.stderr
+    rebuilt_wheel = next(rebuilt_dist.glob("*.whl"))
+    assert _wheel_runtime_hashes(rebuilt_wheel) == _wheel_runtime_hashes(source_wheel)
+    created = run(
+        [uv, "venv", "--python", sys.executable, str(venv)],
+        cwd=root,
+        environment=environment,
+    )
+    assert created.returncode == 0, created.stderr
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    installed = run(
+        [
+            uv,
+            "pip",
+            "install",
+            "--no-deps",
+            "--python",
+            str(python),
+            str(rebuilt_wheel),
+        ],
+        cwd=outside,
+        environment=environment,
+    )
+    assert installed.returncode == 0, installed.stderr
+
+    imported = run(
+        [
+            str(python),
+            "-c",
+            "import mech_cad_design_agent as p; print(p.__version__); print(p.__file__)",
+        ],
+        cwd=outside,
+        environment=environment,
+    )
+    assert imported.returncode == 0, imported.stderr
+    version, module_path = imported.stdout.splitlines()
+    assert version == "0.7.1"
+    # Resolve both sides: on macOS the temporary root is reached through the
+    # /var -> /private/var symlink, while __file__ reports the resolved path.
+    assert Path(module_path).resolve().is_relative_to(venv.resolve())
+
+
+def test_base_wheel_imports_postgres_services_without_neo4j_extra(
+    built_artifacts: tuple[Path, Path, Path],
+) -> None:
+    root, wheel, _ = built_artifacts
+    uv = shutil.which("uv")
+    assert uv is not None
+    venv = root / "base-without-neo4j"
+    outside = root / "base-outside-repository"
+    outside.mkdir()
+    environment = clean_environment(root)
+    created = run(
+        [uv, "venv", "--python", sys.executable, str(venv)],
+        cwd=root,
+        environment=environment,
+    )
+    assert created.returncode == 0, created.stderr
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    installed = run(
+        [uv, "pip", "install", "--python", str(python), str(wheel)],
+        cwd=outside,
+        environment=environment,
+    )
+    assert installed.returncode == 0, installed.stderr
+
+    imported = run(
+        [
+            str(python),
+            "-c",
+            (
+                "import importlib.util; "
+                "assert importlib.util.find_spec('neo4j') is None; "
+                "from mech_cad_design_agent.knowledge_repository import KnowledgeRepository; "
+                "from mech_cad_design_agent.knowledge_service import KnowledgeService; "
+                "from mech_cad_design_agent.projection import Neo4jProjection; "
+                "assert Neo4jProjection('bolt://unused','','').status()['status'] == 'unavailable'; "
+                "print(KnowledgeRepository.__name__, KnowledgeService.__name__)"
+            ),
+        ],
+        cwd=outside,
+        environment=environment,
+    )
+    assert imported.returncode == 0, imported.stderr
+    assert imported.stdout.strip() == "KnowledgeRepository KnowledgeService"

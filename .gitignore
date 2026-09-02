@@ -1,0 +1,11 @@
+.env.local
+.venv/
+.worktrees/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+data/
+/designs/
+/output/
+/dist/

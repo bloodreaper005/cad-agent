@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import sys
 import tempfile
 from typing import Any
 
@@ -32,7 +31,6 @@ from .standard_part_configuration import (
     disable_standard_part_catalog,
     enable_standard_part_catalog,
     load_standard_part_provider_catalog,
-    load_standard_part_sources,
 )
 from .workspace_bootstrap import (
     BootstrapFailure,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Mapping
 
 from .approval_semantics import APPROVE, classify_approval
 from .knowledge_matching import applicability_matches

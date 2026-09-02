@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from .design_session import DesignSessionService
 

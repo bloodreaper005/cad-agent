@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-import os
 from pathlib import Path
 import sys
-from typing import Any
 
 from .bootstrap_diagnostics import DiagnosticGateError, blocked_response
 from .config import (

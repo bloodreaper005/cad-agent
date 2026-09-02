@@ -287,7 +287,7 @@ function Get-D3DockerProjects {
     )) {
         $values = & docker @command
         if ($LASTEXITCODE -ne 0) { throw 'Docker project inventory failed' }
-        $projects += @($values | Where-Object { $_ -match '^md3dcad-[0-9a-f]{32}$' })
+        $projects += @($values | Where-Object { $_ -match '^mcdagent-[0-9a-f]{32}$' })
     }
     return @($projects | Sort-Object -Unique)
 }
@@ -298,7 +298,7 @@ function Get-ResidualD3TestProcesses {
         $_.Name -match '^(python|pythonw|pytest|uv)(\.exe)?$'
     })) {
         $commandLine = [string]$process.CommandLine
-        if ($commandLine -match '(?i)(MechanicalDesignD3|md3dcad|database_deployment)') {
+        if ($commandLine -match '(?i)(MechCadDesignD3|mcdagent|database_deployment)') {
             $matches += $process.ProcessId
         }
     }
@@ -343,7 +343,7 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($composeVersion)) {
     throw 'Docker Compose v2 is required'
 }
 if (@(Get-D3DockerProjects).Count -ne 0) {
-    throw 'A pre-existing md3dcad UUID Compose project blocks the gate'
+    throw 'A pre-existing mcdagent UUID Compose project blocks the gate'
 }
 if (@(Get-ResidualD3TestProcesses).Count -ne 0) {
     throw 'A residual D3 pytest/python/uv process blocks the gate'

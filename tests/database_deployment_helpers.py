@@ -14,7 +14,7 @@ import uuid
 import xml.etree.ElementTree as ET
 
 
-PROJECT_NAME = re.compile(r"md3dcad-[0-9a-f]{32}")
+PROJECT_NAME = re.compile(r"mcdagent-[0-9a-f]{32}")
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
 _CLEAN_ENVIRONMENT_KEYS = frozenset(
     {
@@ -197,7 +197,7 @@ def create_attempt_layout(
             stage="ATTEMPT_LAYOUT",
             indicator="not_directory",
         )
-    project = f"md3dcad-{uuid_factory().hex}"
+    project = f"mcdagent-{uuid_factory().hex}"
     root = canonical_base / project
     try:
         root.mkdir(mode=0o700)

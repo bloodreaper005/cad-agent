@@ -256,7 +256,7 @@ def test_attempt_layout_is_uuid_owned_canonical_and_rejects_symlink_base(
     fixed = uuid.UUID("12345678-1234-5678-1234-567812345678")
     layout = create_attempt_layout(tmp_path, uuid_factory=lambda: fixed)
 
-    assert layout.project == "md3dcad-12345678123456781234567812345678"
+    assert layout.project == "mcdagent-12345678123456781234567812345678"
     assert layout.root.parent == tmp_path.resolve()
     assert layout.root.name == layout.project
     assert layout.deployment.is_dir()
@@ -714,7 +714,7 @@ def test_managed_compose_project_rejects_preexisting_resources_before_up() -> No
     backend.inventory = DockerProjectInventory(("preexisting",), (), ())
 
     with pytest.raises(DeploymentGateError, match="DOCKER_PROJECT_NOT_EMPTY"):
-        with managed_compose_project(backend, "md3dcad-" + "a" * 32):
+        with managed_compose_project(backend, "mcdagent-" + "a" * 32):
             pytest.fail("body must not run")
 
     assert not any(event.startswith("up:") for event in backend.events)
@@ -723,7 +723,7 @@ def test_managed_compose_project_rejects_preexisting_resources_before_up() -> No
 
 def test_managed_compose_project_verifies_labels_and_exact_cleanup() -> None:
     backend = FakeDockerProjectBackend()
-    project = "md3dcad-" + "b" * 32
+    project = "mcdagent-" + "b" * 32
 
     with managed_compose_project(backend, project):
         assert backend.inventory.containers
@@ -735,7 +735,7 @@ def test_managed_compose_project_verifies_labels_and_exact_cleanup() -> None:
 
 def test_unowned_resource_blocks_destructive_cleanup() -> None:
     backend = FakeDockerProjectBackend()
-    project = "md3dcad-" + "c" * 32
+    project = "mcdagent-" + "c" * 32
 
     with pytest.raises(DeploymentGateError, match="DOCKER_OWNERSHIP_UNPROVEN"):
         with managed_compose_project(backend, project):
@@ -753,7 +753,7 @@ def test_cleanup_failure_overrides_passing_body_and_is_redacted() -> None:
     )
 
     with pytest.raises(DeploymentGateError) as captured:
-        with managed_compose_project(backend, "md3dcad-" + "d" * 32):
+        with managed_compose_project(backend, "mcdagent-" + "d" * 32):
             pass
 
     assert captured.value.code == "DOCKER_CLEANUP_FAILED"
@@ -789,7 +789,7 @@ def test_body_failure_is_preserved_after_successful_cleanup() -> None:
     backend = FakeDockerProjectBackend()
 
     with pytest.raises(ValueError, match="synthetic body failure"):
-        with managed_compose_project(backend, "md3dcad-" + "e" * 32):
+        with managed_compose_project(backend, "mcdagent-" + "e" * 32):
             raise ValueError("synthetic body failure")
 
     assert backend.inventory.empty
@@ -797,7 +797,7 @@ def test_body_failure_is_preserved_after_successful_cleanup() -> None:
 
 def test_partial_up_failure_cleans_only_verified_owned_resources() -> None:
     backend = FakeDockerProjectBackend()
-    project = "md3dcad-" + "f" * 32
+    project = "mcdagent-" + "f" * 32
 
     def partial_up(selected: str) -> None:
         FakeDockerProjectBackend.up(backend, selected)

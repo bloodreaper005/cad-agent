@@ -16,7 +16,9 @@
 - Retrieve applicable Product Family Knowledge and Design Lessons before substantive modeling. Use matches; continue normally when there are no matches or the knowledge service is unavailable, unless the user explicitly requires a named knowledge item.
 - Continue CAD implementation and safe validation-driven corrections without further approval while the work remains inside the accepted design direction. A changed function, mechanism, key interface, specified material, manufacturing process, or explicit user constraint requires a revised proposal and direction approval.
 - Bind completion evidence to the exact model SHA-256. Any model change invalidates earlier validation evidence.
+- Record every validation attempt, including the failed ones, through `design_record_result`. The correction ledger is how the agent learns from its own mistakes; skipping a failed attempt to keep the record clean destroys that evidence. Read it back with `design_mistakes` before confirming.
 - Final confirmation records acceptance of the completed design and starts Design Lesson evaluation. It must not reopen, downgrade, or block a completed model.
+- Expect lessons derived from the mandatory checks this design failed and then corrected. They arrive on the same review card marked `origin: validation_correction`, alongside any lesson you propose. Review them as you would your own, and decline any that generalize badly.
 - If evaluation finds no useful lesson, record that outcome and finish. If it finds useful knowledge, create an immutable review card. Ask once whether to publish that card to the durable knowledge store; rejection or an unavailable database leaves the model completed.
 
 ## Requirement discovery
@@ -40,6 +42,12 @@
 - Build a validation specification from the accepted requirements. Check recompute state, shape validity, solids, positive volume, dimensions, placements, required interfaces, provenance, BOM consistency, and applicable interference or fastener contracts.
 - Inspect both machine-readable evidence and the generated validation view. Repair and rerun safe failures automatically.
 - A passed report documents the checks performed; it is not FEA, manufacturing release, certification, or legal standards compliance.
+
+## Learning from mistakes
+
+- Treat a failed validation as data, not as noise to be hidden. Record it, correct it, and let the ledger carry both.
+- Derived lessons are deterministic and carry no language-model output. Do not hand-write a candidate that merely restates a derived one; add a candidate only for engineering judgment the ledger cannot see.
+- Before substantive modeling, use retrieved correction lessons as preventive checks. A published lesson naming a validator and check is a defect this design group has already paid for once.
 
 ## Knowledge architecture
 

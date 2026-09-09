@@ -9,3 +9,10 @@ data/
 /designs/
 /output/
 /dist/
+# Generated CAD artifacts. FreeCAD writes documents into the working directory,
+# so an interactive session can drop one into the repository root.
+*.FCStd
+*.FCStd[0-9]
+*.step
+*.stp
+*.brp

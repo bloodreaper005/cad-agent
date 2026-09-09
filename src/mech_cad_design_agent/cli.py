@@ -130,6 +130,12 @@ def _parser() -> argparse.ArgumentParser:
     design_list = design_commands.add_parser("list", help="list design jobs")
     design_list.add_argument("--workspace", type=Path)
 
+    design_mistakes = design_commands.add_parser(
+        "mistakes", help="report corrected and outstanding validation defects"
+    )
+    design_mistakes.add_argument("--workspace", type=Path)
+    design_mistakes.add_argument("--design-id", required=True)
+
     family = commands.add_parser("family", help="onboard Product Family Knowledge")
     family_commands = family.add_subparsers(dest="family_command", required=True)
 
@@ -519,6 +525,8 @@ def _design_command(arguments: argparse.Namespace) -> dict[str, object]:
         return service.get(arguments.design_id)
     if arguments.design_command == "open":
         return service.resume(arguments.design_id)
+    if arguments.design_command == "mistakes":
+        return service.correction_summary(arguments.design_id)
     return service.list_designs()
 
 

@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 import uuid
-import xml.etree.ElementTree as ET
 import zipfile
 
 from .approval_semantics import APPROVE, classify_approval
@@ -14,6 +13,11 @@ from .config import DesignSettings
 from .fcstd_security import inspect_fcstd_bytes
 from .freecad_runner import run_freecad_script
 from .hashing import file_sha256
+from .mistake_learning import (
+    build_attempt_entry,
+    collect_failures,
+    summarize_corrections,
+)
 from .models import canonical_json, require_safe_id
 from .package_resources import freecad_scripts_directory
 from .secure_fs import (
@@ -64,13 +68,24 @@ def _strict_json_object(value: object, label: str) -> dict[str, Any]:
 
 
 def _shape_free_fcstd(contents: bytes) -> bool:
+    """Report whether an FCStd carries no geometry.
+
+    A neutral seed may still hold an inert metadata object; the packaged seed
+    creator writes exactly one to record that no specialized knowledge was
+    applied. So the presence of an object is not evidence of geometry. FreeCAD
+    stores every shape as its own BREP member and writes an empty member for an
+    object that has no shape, which makes a nonempty BREP member the exact
+    signal that the document carries geometry. The member is read rather than
+    trusted from the archive header so a declared size cannot spoof the check.
+    """
     inspect_fcstd_bytes(contents)
     with zipfile.ZipFile(BytesIO(contents), "r") as archive:
-        document = archive.read("Document.xml")
-    root = ET.fromstring(document)
-    for element in root.iter():
-        if element.tag.casefold() == "object":
-            return False
+        for entry in archive.infolist():
+            if not entry.filename.casefold().endswith((".brp", ".brep")):
+                continue
+            with archive.open(entry) as member:
+                if member.read(1):
+                    return False
     return True
 
 
@@ -128,6 +143,11 @@ def _validate_state(raw: object) -> dict[str, Any]:
         raise ValueError("design.json model state is invalid")
     if not isinstance(validation, dict):
         raise ValueError("design.json validation state is invalid")
+    ledger = state.get("correction_ledger")
+    if ledger is None:
+        state["correction_ledger"] = []
+    elif not isinstance(ledger, list):
+        raise ValueError("design.json correction_ledger is invalid")
     return state
 
 
@@ -328,6 +348,7 @@ class DesignSessionService:
                         "report_relative_path": None,
                         "evidence_relative_paths": [],
                     },
+                    "correction_ledger": [],
                     "final_confirmation": {
                         "state": "not_confirmed",
                         "text": None,
@@ -620,6 +641,27 @@ class DesignSessionService:
                 "next_action": "evaluate_design_lessons",
             }
 
+    @staticmethod
+    def _ledger_of(state: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Read the append-only correction ledger, tolerating pre-0.8.0 sessions."""
+        recorded = state.get("correction_ledger")
+        if not isinstance(recorded, list):
+            return []
+        return [dict(entry) for entry in recorded if isinstance(entry, Mapping)]
+
+    def correction_summary(self, design_id: str) -> dict[str, object]:
+        """Report the validation defects this design made and corrected."""
+        root = self._root_for(design_id, must_exist=True)
+        state = self._read_state(root)
+        summary = summarize_corrections(self._ledger_of(state))
+        return {
+            **summary,
+            "design_id": state["design_id"],
+            "title": state["title"],
+            "model_status": state["model_status"],
+            "validation_status": state["validation"].get("status"),
+        }
+
     def confirmation_context(self, design_id: str) -> dict[str, object]:
         """Return exact-hash evidence available to the lesson evaluator."""
         root = self._root_for(design_id, must_exist=True)
@@ -653,6 +695,7 @@ class DesignSessionService:
                 "model_sha256": model_sha256,
                 "validation_report_sha256": evidence[0]["sha256"],
                 "evidence": evidence,
+                "correction_ledger": self._ledger_of(state),
             }
 
     def record_lesson_review(
@@ -789,11 +832,25 @@ class DesignSessionService:
             ]
             model_read = read_managed_file(model)
             inspect_fcstd_bytes(model_read.content)
-            result_status, validation_status, warning = self._check_validation(
+            result_status, validation_status, warning, failures = self._check_validation(
                 report_path=report_path,
                 evidence=evidence,
                 model_sha256=model_read.sha256,
             )
+            ledger = self._ledger_of(state)
+            recorded_at = _timestamp()
+            ledger.append(
+                build_attempt_entry(
+                    attempt=len(ledger) + 1,
+                    recorded_at=recorded_at,
+                    model_sha256=model_read.sha256,
+                    model_status=result_status,
+                    validation_status=validation_status,
+                    warning=warning,
+                    failures=failures,
+                )
+            )
+            state["correction_ledger"] = ledger
             state["model_status"] = result_status
             state["model"]["sha256"] = model_read.sha256
             state["validation"] = {
@@ -831,7 +888,8 @@ class DesignSessionService:
     @staticmethod
     def _check_validation(
         *, report_path: Path, evidence: Sequence[Path], model_sha256: str
-    ) -> tuple[str, str, str | None]:
+    ) -> tuple[str, str, str | None, list[dict[str, Any]]]:
+        """Classify one validation attempt and return every failed check it names."""
         try:
             report = json.loads(read_managed_file(report_path).content.decode("utf-8"))
         except (
@@ -840,34 +898,54 @@ class DesignSessionService:
             OSError,
             SecureFilesystemError,
         ) as exc:
-            return "needs_attention", "incomplete", f"invalid validation JSON: {exc}"
+            return "needs_attention", "incomplete", f"invalid validation JSON: {exc}", []
         if not isinstance(report, dict):
-            return "needs_attention", "incomplete", "validation report is not an object"
+            return "needs_attention", "incomplete", "validation report is not an object", []
         if report.get("working_sha256") != model_sha256:
-            return "needs_attention", "stale", "validation report hash is stale"
+            return "needs_attention", "stale", "validation report hash is stale", []
         checks = report.get("checks")
         inventory = report.get("fastener_inventory")
         summary = report.get("summary")
         if not isinstance(checks, list) or not isinstance(inventory, list) or not isinstance(summary, dict):
-            return "needs_attention", "incomplete", "validation report contract is incomplete"
+            return "needs_attention", "incomplete", "validation report contract is incomplete", []
         if summary.get("fasteners_detected") != len(inventory):
-            return "needs_attention", "incomplete", "fastener inventory count is inconsistent"
+            return "needs_attention", "incomplete", "fastener inventory count is inconsistent", []
         for check in checks:
             if not isinstance(check, dict) or any(
                 field not in check
                 for field in ("id", "validator", "status", "message", "mandatory")
             ):
-                return "needs_attention", "incomplete", "validation check contract is incomplete"
+                return "needs_attention", "incomplete", "validation check contract is incomplete", []
             if check.get("mandatory") is True and check.get("status") != "passed":
-                return "needs_attention", "failed", "mandatory validation check failed"
+                return (
+                    "needs_attention",
+                    "failed",
+                    "mandatory validation check failed",
+                    collect_failures(report),
+                )
         suffixes = {path.suffix.casefold() for path in evidence if path.is_file()}
         if ".md" not in suffixes or ".png" not in suffixes:
-            return "needs_attention", "incomplete", "Markdown and PNG evidence are required"
+            return (
+                "needs_attention",
+                "incomplete",
+                "Markdown and PNG evidence are required",
+                collect_failures(report),
+            )
         if any(path.stat().st_size <= 0 for path in evidence):
-            return "needs_attention", "incomplete", "validation evidence is empty"
+            return (
+                "needs_attention",
+                "incomplete",
+                "validation evidence is empty",
+                collect_failures(report),
+            )
         if report.get("status") != "passed":
-            return "needs_attention", "failed", "validation report did not pass"
-        return "completed", "passed", None
+            return (
+                "needs_attention",
+                "failed",
+                "validation report did not pass",
+                collect_failures(report),
+            )
+        return "completed", "passed", None, []
 
 
 __all__ = ["DesignSessionService"]

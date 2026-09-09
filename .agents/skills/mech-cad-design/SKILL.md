@@ -17,7 +17,8 @@ After approval:
 3. model directly in the session FCStd with FreeCAD or CadQuery;
 4. run `freecad-model-validation`, inspect the JSON, Markdown, PNG, and visual
    result, correct safe failures, and rerun until required checks pass;
-5. call `design_record_result` with the exact model and evidence paths;
+5. call `design_record_result` with the exact model and evidence paths, for
+   every attempt including the ones that fail validation;
 6. when the user confirms the completed design, derive reusable candidate
    lessons and call `design_confirm` in the same turn;
 7. finish if no material lesson exists, or display the returned review card and

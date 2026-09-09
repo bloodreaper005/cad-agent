@@ -8,6 +8,11 @@ from typing import Any, Mapping, Sequence
 from .approval_semantics import APPROVE, REJECT, classify_approval
 from .design_session import DesignSessionService
 from .hashing import file_sha256
+from .mistake_learning import (
+    AGENT_ORIGIN,
+    CORRECTION_ORIGIN,
+    derive_lesson_candidates,
+)
 from .models import canonical_json
 from .secure_fs import (
     atomic_publish_new,
@@ -70,6 +75,7 @@ class DesignLessonWorkflow:
             revision_text=review_revision_text,
         )
         accepted, screened, errors = self._evaluate_candidates(candidates, context)
+        accepted = self._merge_corrections(accepted, context)
         model_sha256 = str(context["model_sha256"])
         if errors:
             if revision is None:
@@ -385,10 +391,50 @@ class DesignLessonWorkflow:
             card_sha256,
         )
 
+    def _merge_corrections(
+        self,
+        accepted: Sequence[Mapping[str, object]],
+        context: Mapping[str, object],
+    ) -> list[dict[str, object]]:
+        """Append lessons derived from validation defects this design corrected.
+
+        Derived lessons never block confirmation: a malformed derivation is
+        dropped so a completed model can still be confirmed and published.
+        """
+        merged = [dict(candidate) for candidate in accepted]
+        derived = derive_lesson_candidates(
+            ledger=context.get("correction_ledger"),
+            evidence_relative_paths=[
+                str(item["relative_path"])
+                for item in context["evidence"]  # type: ignore[union-attr]
+            ],
+        )
+        if not derived:
+            return merged
+        evaluated, _, errors = self._evaluate_candidates(
+            derived, context, origin=CORRECTION_ORIGIN
+        )
+        if errors:
+            return merged
+        known = {
+            str(candidate["correction_signature"])
+            for candidate in merged
+            if candidate.get("correction_signature")
+        }
+        for candidate in evaluated:
+            signature = str(candidate.get("correction_signature") or "")
+            if signature and signature in known:
+                continue
+            known.add(signature)
+            merged.append(candidate)
+        return merged
+
     @staticmethod
     def _evaluate_candidates(
         candidates: Sequence[Mapping[str, object]],
         context: Mapping[str, object],
+        *,
+        origin: str = AGENT_ORIGIN,
     ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
         if isinstance(candidates, (str, bytes)) or not isinstance(candidates, Sequence):
             raise ValueError("candidates must be a list")
@@ -473,18 +519,23 @@ class DesignLessonWorkflow:
                     }
                 )
                 continue
-            accepted.append(
-                {
-                    "problem": candidate["problem"].strip(),
-                    "decision": candidate["decision"].strip(),
-                    "evidence": list(dict.fromkeys(candidate["evidence"])),
-                    "applicability": candidate["applicability"].strip(),
-                    "prevention_action": candidate["prevention_action"].strip(),
-                    "search_terms": list(dict.fromkeys(candidate["search_terms"])),
-                    "scope": scope,
-                    "product_family_id": candidate.get("product_family_id"),
-                }
-            )
+            entry: dict[str, object] = {
+                "problem": candidate["problem"].strip(),
+                "decision": candidate["decision"].strip(),
+                "evidence": list(dict.fromkeys(candidate["evidence"])),
+                "applicability": candidate["applicability"].strip(),
+                "prevention_action": candidate["prevention_action"].strip(),
+                "search_terms": list(dict.fromkeys(candidate["search_terms"])),
+                "scope": scope,
+                "product_family_id": candidate.get("product_family_id"),
+                "origin": origin,
+            }
+            if origin == CORRECTION_ORIGIN:
+                entry["correction_signature"] = candidate.get("correction_signature")
+                entry["correction_occurrences"] = candidate.get(
+                    "correction_occurrences"
+                )
+            accepted.append(entry)
         return accepted, screened, errors
 
     @staticmethod

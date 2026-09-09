@@ -291,6 +291,11 @@ def create_mcp(
         )
 
     @registrar.tool()
+    def design_mistakes(design_id: str) -> str:
+        """Report validation defects this design corrected or still carries."""
+        return _tool_call(lambda: get_design_reader().correction_summary(design_id))
+
+    @registrar.tool()
     def design_confirm(
         design_id: str,
         confirmation_text: str,

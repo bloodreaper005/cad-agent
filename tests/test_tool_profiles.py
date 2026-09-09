@@ -24,6 +24,7 @@ def test_design_surface_exposes_the_complete_normal_flow() -> None:
         "design_list",
         "design_knowledge_retrieve",
         "design_record_result",
+        "design_mistakes",
         "design_confirm",
         "design_lesson_decide",
         "standard_part_providers_get",

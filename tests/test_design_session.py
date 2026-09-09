@@ -211,8 +211,12 @@ def test_new_design_can_reuse_only_a_shape_free_fcstd_seed(tmp_path: Path) -> No
     assert state["model"]["seed_sha256"] == file_sha256(empty)
     assert state["model"]["source_relative_path"] is None
 
+    # Real FreeCAD stores a part's geometry as a nonempty BREP member, so a
+    # seed that already carries a part looks like this on disk.
     shaped = tmp_path / "shaped.FCStd"
-    shaped.write_bytes(_fcstd(object_name="ExistingPart"))
+    shaped.write_bytes(
+        _fcstd_with_breps({"ExistingPart.Shape.brp": b"DBRep_DrawableShape\n"})
+    )
     with pytest.raises(ValueError, match="shape-free"):
         _start(
             service,
@@ -391,3 +395,69 @@ def test_changed_model_invalidates_a_completed_session(tmp_path: Path) -> None:
 
     assert state["model_status"] == "needs_attention"
     assert state["validation"]["status"] == "stale"
+
+
+def _fcstd_with_breps(members: dict[str, bytes]) -> bytes:
+    """Build an FCStd whose objects own the given BREP shape payloads."""
+    objects = "".join(
+        f'<Object type="Part::Feature" name="{name.split(".")[0]}"/>' for name in members
+    )
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "Document.xml",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Document SchemaVersion="4"><Objects>'
+            f"{objects}</Objects></Document>",
+        )
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+    return output.getvalue()
+
+
+def test_a_metadata_only_seed_is_shape_free() -> None:
+    """The packaged seed creator adds one shapeless audit object on purpose.
+
+    FreeCAD writes an empty BREP member for an object with no shape, so a seed
+    that carries only metadata must still count as shape-free.
+    """
+    from mech_cad_design_agent.design_session import _shape_free_fcstd
+
+    seed = _fcstd_with_breps({"DesignAudit.Shape.brp": b""})
+    assert _shape_free_fcstd(seed) is True
+
+
+def test_real_geometry_is_not_shape_free() -> None:
+    from mech_cad_design_agent.design_session import _shape_free_fcstd
+
+    modelled = _fcstd_with_breps({"Block.Shape.brp": b"DBRep_DrawableShape\n\n"})
+    assert _shape_free_fcstd(modelled) is False
+
+
+def test_geometry_is_detected_beside_a_shapeless_object() -> None:
+    from mech_cad_design_agent.design_session import _shape_free_fcstd
+
+    mixed = _fcstd_with_breps(
+        {"DesignAudit.Shape.brp": b"", "Block.Shape.brp": b"DBRep_DrawableShape\n"}
+    )
+    assert _shape_free_fcstd(mixed) is False
+
+
+def test_new_design_rejects_a_seed_creator_that_writes_geometry(
+    tmp_path: Path,
+) -> None:
+    service = DesignSessionService(
+        _settings(tmp_path),
+        seed_creator=lambda destination: destination.write_bytes(
+            _fcstd_with_breps({"Block.Shape.brp": b"DBRep_DrawableShape\n"})
+        ),
+    )
+    with pytest.raises(ValueError, match="shape-free"):
+        service.start(
+            design_id="seeded",
+            title="Seeded",
+            model_classification="new_design",
+            requirements={},
+            proposal_summary="p",
+            approval_text="yes",
+        )

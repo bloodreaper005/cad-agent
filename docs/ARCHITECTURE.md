@@ -96,6 +96,24 @@ and reports every planned action under `--dry-run` first.
 records from an existing PostgreSQL database into the local store, skipping
 records already present so a repeated import is safe.
 
+## Correction ledger
+
+`design.json` carries an append-only `correction_ledger`. Each recorded result
+adds one `DesignCorrectionLedger/v1` entry holding the attempt number, the model
+SHA-256 it validated, the validation outcome, and every failed check with its
+validator, identifier, message, and whether it was mandatory. Later attempts
+append; they never edit or remove an earlier entry, so a corrected failure stays
+readable after the model passes.
+
+A session written before this release has no ledger. It loads normally and
+reports an empty one, so existing design jobs keep working unchanged.
+
+`design_mistakes` and `mech-cad-design design mistakes` summarize the ledger as
+`DesignMistakeSummary/v1`: defects corrected before the confirmed model, and
+defects still outstanding while the newest attempt fails. Corrections are
+reported only while the newest attempt passes, so a currently failing design
+never claims a fix.
+
 ## Design Lessons
 
 Final-model confirmation immediately evaluates structured candidates derived
@@ -105,6 +123,16 @@ standard-part evidence, and manufacturing notes.
 A candidate must identify a reusable problem, decision, evidence,
 applicability, prevention action, and search terms. Private, customer-specific,
 project-only, unsupported, or non-reusable candidates are excluded.
+
+Candidates also come from the correction ledger itself. Every mandatory check
+that failed on an earlier attempt and passed on the confirmed model yields one
+deterministic candidate marked `origin: validation_correction`, carrying its
+`validator::check_id` signature and attempt count. Agent-proposed candidates are
+marked `origin: agent` and keep their positions on the card, so lesson selection
+numbers stay stable. Derivation is pure, timestamp-free, and reproducible, so
+repeating a confirmation yields a byte-identical review card. It cannot block
+completion: a derived candidate that fails validation is dropped rather than
+turned into a candidate error.
 
 When nothing material remains, the design finishes. Otherwise the package
 writes one immutable `DesignLessonReviewCard/v1` and returns it for display.

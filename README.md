@@ -22,6 +22,7 @@ User request
   → knowledge retrieval
   → CAD modeling
   → automatic validation and correction
+  → correction capture
   → final result
   → natural-language final confirmation
   → automatic Design Lesson evaluation
@@ -43,8 +44,13 @@ User request
   fasteners, BOM consistency, and visual evidence.
 - Bind completion to the exact FCStd SHA-256 and passed JSON, Markdown, and PNG
   evidence.
+- Record every validation attempt in an append-only correction ledger, so a
+  failure that was fixed is not lost when the next attempt is recorded.
 - Evaluate reusable lessons automatically after the user confirms the final
-  model.
+  model, including lessons derived from the mandatory checks this design failed
+  and then corrected.
+- Feed published correction lessons back through ordinary knowledge retrieval,
+  so a later design finds the defect before repeating it.
 - Store long-term Product Family profiles, Knowledge Assertions, and Design
   Lessons in a local SQLite database by default, with optional PostgreSQL for
   shared team use and an optional rebuild-only Neo4j projection.
@@ -58,6 +64,7 @@ The default `design` surface contains the complete design flow:
 - `design_status`
 - `design_knowledge_retrieve`
 - `design_record_result`
+- `design_mistakes`
 - `design_confirm`
 - `design_lesson_decide`
 - `standard_part_providers_get`
@@ -81,6 +88,26 @@ The knowledge store holds only durable Product Families, Knowledge Assertions,
 and Design Lessons, in local SQLite by default or PostgreSQL when configured.
 Neo4j is optional, rebuildable, and never authoritative. See
 [Architecture and trust boundaries](docs/ARCHITECTURE.md).
+
+## Learning from corrected mistakes
+
+Every call to `design_record_result` appends one entry to the design's
+append-only correction ledger: the model hash, the validation outcome, and each
+failed check. Nothing in a later attempt rewrites an earlier one, so the record
+of what went wrong survives the fix.
+
+When the user confirms the final model, the package groups the mandatory checks
+that failed on earlier attempts and passed on the confirmed model. Each such
+defect becomes one deterministic Design Lesson candidate carrying
+`origin: validation_correction`, its check signature, and how many attempts it
+cost. These candidates join any the agent proposes on the same immutable review
+card and follow the same single publication decision.
+
+Derivation runs without a language model and never blocks: a design that made
+no mistakes derives nothing, an advisory-only failure derives nothing, and a
+malformed derivation is dropped rather than holding up a completed model. Once
+published, correction lessons are ordinary Design Lessons, so
+`design_knowledge_retrieve` returns them to later designs in the same scope.
 
 ## Install and run
 
@@ -127,6 +154,7 @@ mech-cad-design design start --workspace W --design-id ID --title T \
 mech-cad-design design list --workspace W
 mech-cad-design design open --workspace W --design-id ID
 mech-cad-design design status --workspace W --design-id ID
+mech-cad-design design mistakes --workspace W --design-id ID
 
 mech-cad-design family start --workspace W --onboarding-id OB \
   --family-id F --family-name N [--alias A]
@@ -139,6 +167,9 @@ mech-cad-design knowledge bootstrap --workspace W
 mech-cad-design knowledge import-postgres --workspace W --source-env E
 mech-cad-design standard-parts providers [--category C]
 ```
+
+`design mistakes` reports which mandatory validation checks this design failed
+and later corrected, and which defects are still outstanding.
 
 `design start` is idempotent: repeating it with the same design intent resumes
 the existing job instead of creating a second one. `design open` reports where

@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-09-08
+
+### Learning from corrected mistakes
+
+- Record every validation attempt in an append-only `correction_ledger` inside `design.json`, holding the model SHA-256, the outcome, and each failed check. A later attempt appends and never rewrites an earlier one, so a failure that was fixed stays readable after the model passes. Sessions written before this release load unchanged and report an empty ledger.
+- Derive Design Lesson candidates from the mandatory checks a design failed and then corrected. Each carries `origin: validation_correction`, its `validator::check_id` signature, and its attempt count, and joins any agent-proposed candidate on the same immutable review card under the same single publication decision.
+- Keep derivation deterministic, timestamp-free, and free of language-model output, so repeating a confirmation produces a byte-identical review card. Derivation never blocks completion: a clean design derives nothing, an advisory-only failure derives nothing, and a malformed derivation is dropped instead of raising a candidate error.
+- Publish correction lessons as ordinary Design Lessons, so `design_knowledge_retrieve` returns them to later designs in the same scope and the loop closes.
+- Add the `design_mistakes` MCP tool and `mech-cad-design design mistakes` command, reporting corrected and outstanding defects as `DesignMistakeSummary/v1`. Corrections are reported only while the newest attempt passes, so a currently failing design never claims a fix.
+- Report every failed check from a validation report rather than stopping at the first one, without changing which status or warning a recorded result produces.
+
+### Knowledge storage
 
 - Add an embedded SQLite knowledge backend and make it the default, so durable Product Family Knowledge and Design Lessons work with no database service running. PostgreSQL remains available for shared team use and is selected automatically whenever `MECH_DESIGN_DATABASE_URL` is set.
 - Select the backend explicitly with `MECH_DESIGN_KNOWLEDGE_BACKEND`, and relocate the local store with `MECH_DESIGN_SQLITE_PATH`.

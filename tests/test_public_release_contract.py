@@ -152,6 +152,24 @@ def test_manifest_authorizes_every_public_file_and_is_self_scanned() -> None:
         assert "BEGIN " + "RSA PRIVATE KEY" not in text, relative
 
 
+def test_manifest_classifies_every_test_file_on_disk() -> None:
+    """A new test must be published or explicitly excluded, never silently dropped.
+
+    Without this the projection ships source whose tests were left behind, and
+    every other release check still passes.
+    """
+    manifest = load_public_repository_manifest(PROJECT_ROOT)
+    classified = set(manifest.public_tests) | set(manifest.excluded_private_paths)
+    on_disk = {
+        f"tests/{path.name}" for path in (PROJECT_ROOT / "tests").glob("*.py")
+    }
+    unclassified = sorted(on_disk - classified)
+    assert not unclassified, (
+        "add these to public_tests or excluded_private_paths in "
+        f"public-repository.toml: {unclassified}"
+    )
+
+
 def test_manifest_explicitly_excludes_private_development_content() -> None:
     manifest = load_public_repository_manifest(PROJECT_ROOT)
     excluded = set(manifest.excluded_private_paths)

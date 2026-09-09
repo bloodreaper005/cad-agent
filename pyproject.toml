@@ -1,6 +1,6 @@
 [project]
 name = "mech-cad-design-agent"
-version = "0.7.1"
+version = "0.8.0"
 description = "AI mechanical CAD design, validation, reusable knowledge, and MCP tools for coding agents"
 readme = "README.md"
 authors = [{ name = "Sanat Pednekar", email = "sanatmphjs@gmail.com" }]

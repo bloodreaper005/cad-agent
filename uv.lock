@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "mech-cad-design-agent"
-version = "0.7.1"
+version = "0.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },

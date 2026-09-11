@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Gear-drive sizing
+
+- Add `design_gear_size` and `mech-cad-design gear size`, sizing a spur reduction from duty inputs (power, pinion and gear speed, material, duty, life, safety factor) through tooth-count selection, module iteration, forces, bending and contact stress by ANSI/AGMA 2101-D04 through ISO 6336-3 form factors, shaft diameter, and required bearing dynamic capacity. Pure standard-library `gear_sizing/` package; no numerical dependency added.
+- Separate every result into `given` inputs, `derived` values, declared `assumptions`, and stated `limitations`. Preliminary sizing evidence only, never a strength certification: scuffing, micropitting, thermal rating, and lubrication are explicitly out of scope, and only material allowables cross-checked against their published US-unit originals are shipped.
+- Keep every rejected module iteration in the record alongside the accepted one, so the selection can be audited rather than trusted blindly.
+- Add `gear_validation_spec.build_gear_validation_spec`, turning a sized result into a `freecad-model-validation` specification that checks a built pair's module, tooth counts, face width, and centre distance against the calculated values, plus an interference gate. A model that drifts from its own sizing result fails on that exact value and reaches the correction ledger the same way any other validation failure does.
+- Add the packaged `create_gear_pair.py` FreeCAD script, modelling a standard involute spur pair from a sizing result and stamping the design values onto the objects as properties.
+
 ## 0.8.0 - 2026-09-08
 
 ### Learning from corrected mistakes

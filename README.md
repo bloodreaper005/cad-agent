@@ -35,6 +35,11 @@ User request
 - Retrieve matching Product Family Knowledge and Design Lessons when available.
 - Continue CAD work when knowledge has no match or its backend is unavailable.
 - Model interactively in FreeCAD and keep FCStd as the source of truth.
+- Size a spur gear drive from duty inputs (power, speeds, material, duty,
+  life, safety factor) through ratio, module, forces, bending and contact
+  stress, shaft diameter, and required bearing capacity, then model and
+  validate the resulting pair against the same calculated values. Preliminary
+  sizing evidence, not a strength certification; see its `limitations`.
 - Find purchasable standard parts through configured structured providers and,
   when they miss, extend the search to authoritative manufacturer, standards
   body, industry association, and attributable authorized-distributor sources.
@@ -65,6 +70,7 @@ The default `design` surface contains the complete design flow:
 - `design_knowledge_retrieve`
 - `design_record_result`
 - `design_mistakes`
+- `design_gear_size`
 - `design_confirm`
 - `design_lesson_decide`
 - `standard_part_providers_get`
@@ -142,7 +148,8 @@ mech-cad-design-mcp
 ## Command line
 
 Every command prints one JSON document and exits `0` ready, `1` warning,
-`2` setup required, or `3` blocked.
+`2` setup required, or `3` blocked. `gear size` uses the same scale: `0`
+sized, `1` sized with warnings, `3` rejected.
 
 ```bash
 mech-cad-design init --workspace W --actor A --organization O --design-group G
@@ -155,6 +162,10 @@ mech-cad-design design list --workspace W
 mech-cad-design design open --workspace W --design-id ID
 mech-cad-design design status --workspace W --design-id ID
 mech-cad-design design mistakes --workspace W --design-id ID
+
+mech-cad-design gear size --power-kw 7.5 --pinion-rpm 1450 --gear-rpm 480 \
+  --pinion-material 20MnCr5_carburised_G2 --gear-material 20MnCr5_carburised_G2 \
+  --duty moderate --life-hours 20000 --safety-factor 1.5 [--out sizing.json]
 
 mech-cad-design family start --workspace W --onboarding-id OB \
   --family-id F --family-name N [--alias A]

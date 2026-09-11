@@ -164,3 +164,27 @@ from generated design artifacts.
 
 These checks provide evidence, not strength analysis, manufacturing release,
 or safety certification.
+
+## Gear-drive sizing
+
+`design_gear_size` and `mech-cad-design gear size` take duty inputs (power,
+pinion and gear speed, material, duty, life, safety factor) and carry a spur
+reduction through tooth-count selection, module iteration, forces, bending
+and contact stress by ANSI/AGMA 2101-D04 through ISO 6336-3 form factors,
+shaft diameter, and required bearing dynamic capacity. `gear_sizing/` is pure
+stdlib, so it needs no FreeCAD session and runs offline.
+
+The result separates `given` inputs from `derived` values and declared
+`assumptions`, keeps every rejected module iteration alongside the accepted
+one, and states its `limitations` explicitly: preliminary sizing evidence,
+not FEA, not certification. Scuffing, micropitting, thermal rating, and
+lubrication are out of scope; the bearing figure is a required capacity, not
+a catalogue selection. Only material allowables cross-checked against their
+published US-unit originals are shipped.
+
+`gear_validation_spec.build_gear_validation_spec` turns a sized result into a
+`freecad-model-validation` specification: `property:` checks on module, tooth
+counts, face width, and centre distance, plus an interference gate on the
+built pair. A model whose geometry drifts from the sizing result fails on
+that exact value, which is what lets a modelling mistake reach the
+correction ledger the same way any other validation failure does.

@@ -6,6 +6,7 @@
 - The public agent does not include rendering, video, or assembly-animation subsystems unless the project scope is explicitly expanded.
 - Use the `mech-cad-design` MCP for design state and knowledge operations and the configured `freecad` MCP for interactive inspection and CAD edits.
 - The agent provides design and validation evidence. It does not independently certify strength, safety, manufacturability, or standards compliance.
+- Gear-drive sizing (`design_gear_size`, `mech-cad-design gear size`) computes bending and contact stress from AGMA/ISO relations, which is a deliberate expansion of that boundary into preliminary sizing evidence. It follows the same rule as validation: a result documents the checks it ran and the assumptions it made, and is never FEA, a strength certification, or manufacturing release. Every result states what it did not evaluate.
 
 ## Normal design process
 

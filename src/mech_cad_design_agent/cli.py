@@ -10,11 +10,22 @@ import tempfile
 from typing import Any
 
 from . import __version__
+from .approval_semantics import APPROVE, classify_approval
 from .bootstrap_diagnostics import DiagnosticGateError
 from .bootstrap_runtime import BootstrapRuntime
 from .database_bootstrap import bootstrap_knowledge_database
 from .design_session import DesignSessionService
+from .freecad_runner import run_freecad_script
+from .gear_sizing import (
+    GearDriveInput,
+    GearSizingError,
+    size_gear_drive,
+    to_mapping,
+    to_review_sheet,
+)
 from .knowledge_backend import build_repository
+from .package_resources import freecad_scripts_directory
+from .secure_fs import atomic_publish_new, atomic_replace
 from .knowledge_import import import_into_sqlite, read_postgres_knowledge
 from .knowledge_repository import KnowledgeRepository, KnowledgeScope
 from .product_family_knowledge import ProductFamilyKnowledgeService
@@ -135,6 +146,68 @@ def _parser() -> argparse.ArgumentParser:
     )
     design_mistakes.add_argument("--workspace", type=Path)
     design_mistakes.add_argument("--design-id", required=True)
+
+    gear = commands.add_parser("gear", help="size gear drives")
+    gear_commands = gear.add_subparsers(dest="gear_command", required=True)
+
+    gear_size = gear_commands.add_parser(
+        "size", help="size a spur gear drive from duty inputs"
+    )
+    gear_size.add_argument("--power-kw", type=float, required=True)
+    gear_size.add_argument("--pinion-rpm", type=float, required=True)
+    gear_size.add_argument("--gear-rpm", type=float, required=True)
+    gear_size.add_argument("--gear-type", default="spur", choices=("spur",))
+    gear_size.add_argument("--pinion-material", required=True)
+    gear_size.add_argument("--gear-material", required=True)
+    gear_size.add_argument(
+        "--duty",
+        required=True,
+        choices=("uniform", "light", "moderate", "heavy"),
+    )
+    gear_size.add_argument("--life-hours", type=float, required=True)
+    gear_size.add_argument("--safety-factor", type=float, required=True)
+    gear_size.add_argument("--driver", default="electric_motor")
+    gear_size.add_argument("--pressure-angle-deg", type=float)
+    gear_size.add_argument("--face-width-ratio", type=float)
+    gear_size.add_argument("--module-mm", type=float)
+    gear_size.add_argument("--pinion-teeth", type=int)
+    gear_size.add_argument("--gear-teeth", type=int)
+    gear_size.add_argument(
+        "--contact-safety-basis", default="stress", choices=("stress", "load")
+    )
+    gear_size.add_argument("--quality-grade", type=int, default=7)
+    gear_size.add_argument("--reliability", type=float, default=0.99)
+    gear_size.add_argument("--shaft-material", default="42CrMo4_QT")
+    gear_size.add_argument("--bearing-type", default="deep_groove_ball")
+    gear_size.add_argument(
+        "--materials-file",
+        type=Path,
+        help="JSON file declaring allowables for materials outside the AGMA "
+        "tables, such as stainless; the result records them as declared",
+    )
+    gear_size.add_argument("--out", type=Path)
+    gear_size.add_argument(
+        "--format",
+        dest="output_format",
+        default="json",
+        choices=("json", "review"),
+        help="review prints the sheet to read before approving the build",
+    )
+
+    gear_build = gear_commands.add_parser(
+        "build",
+        help="model the sized pair in FreeCAD, once the sizing is approved",
+    )
+    gear_build.add_argument("--workspace", type=Path)
+    gear_build.add_argument("--design-id", required=True)
+    gear_build.add_argument("--title", required=True)
+    gear_build.add_argument("--sizing", type=Path, required=True)
+    gear_build.add_argument(
+        "--approve",
+        required=True,
+        help="your decision on the sizing, in your own words; nothing is "
+        "modelled unless this reads as approval",
+    )
 
     family = commands.add_parser("family", help="onboard Product Family Knowledge")
     family_commands = family.add_subparsers(dest="family_command", required=True)
@@ -499,6 +572,157 @@ def _design_service(runtime: BootstrapRuntime, *, require_freecad: bool):
     return DesignSessionService(settings)
 
 
+def _gear_command(arguments: argparse.Namespace) -> dict[str, object]:
+    specification = GearDriveInput(
+        power_kw=arguments.power_kw,
+        pinion_speed_rpm=arguments.pinion_rpm,
+        gear_speed_rpm=arguments.gear_rpm,
+        gear_type=arguments.gear_type,
+        pinion_material=arguments.pinion_material,
+        gear_material=arguments.gear_material,
+        duty=arguments.duty,
+        life_hours=arguments.life_hours,
+        safety_factor=arguments.safety_factor,
+        driver=arguments.driver,
+        normal_pressure_angle_deg=arguments.pressure_angle_deg,
+        face_width_ratio=arguments.face_width_ratio,
+        forced_module_mm=arguments.module_mm,
+        forced_pinion_teeth=arguments.pinion_teeth,
+        forced_gear_teeth=arguments.gear_teeth,
+        contact_safety_basis=arguments.contact_safety_basis,
+        quality_grade_qv=arguments.quality_grade,
+        reliability=arguments.reliability,
+        shaft_material_key=arguments.shaft_material,
+        bearing_type=arguments.bearing_type,
+        custom_materials=(
+            json.loads(arguments.materials_file.read_text(encoding="utf-8"))
+            if getattr(arguments, "materials_file", None)
+            else None
+        ),
+    )
+    sized = size_gear_drive(specification)
+    result = to_mapping(sized)
+    if arguments.out is not None:
+        arguments.out.write_text(
+            json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+    if getattr(arguments, "output_format", "json") == "review":
+        print(to_review_sheet(sized))
+        raise SystemExit(_gear_exit_code(result))
+    return result
+
+
+def _gear_build_command(arguments: argparse.Namespace) -> dict[str, object]:
+    """Model the sized pair, but only once the sizing has been approved.
+
+    The approval is read by meaning, not by matching a fixed phrase, and it
+    becomes the design session's direction approval. Anything that is not a
+    clear yes leaves the workspace untouched: no design job, no geometry.
+    """
+    decision = classify_approval(arguments.approve)
+    sizing = json.loads(arguments.sizing.read_text(encoding="utf-8"))
+
+    if decision != APPROVE:
+        return {
+            "schema_version": "GearBuildResult/v1",
+            "status": "not_approved",
+            "decision_state": decision,
+            "design_id": arguments.design_id,
+            "built": False,
+            "next_action": (
+                "revise_the_sizing"
+                if decision == "REJECT"
+                else "restate_the_decision"
+            ),
+            "message": (
+                "nothing was modelled; the sizing needs a clear approval first"
+            ),
+        }
+    if sizing.get("status") != "sized":
+        raise GearSizingError(
+            "sizing.not_sized",
+            f"the sizing result is {sizing.get('status')!r}; only a sized "
+            "drive has geometry to build",
+        )
+
+    geometry = sizing["derived"]["geometry"]
+    teeth = sizing["derived"]["teeth"]
+    runtime = _runtime(arguments.workspace)
+    settings = runtime.design_settings()
+    service = DesignSessionService(settings)
+
+    started = service.start(
+        design_id=arguments.design_id,
+        title=arguments.title,
+        model_classification="new_design",
+        requirements=dict(sizing["given"]),
+        proposal_summary=(
+            f"Spur pair, module {geometry['module_mm']} mm, "
+            f"{teeth['pinion']}/{teeth['gear']} teeth, "
+            f"{geometry['face_width_mm']} mm face width, "
+            f"{geometry['centre_distance_mm']} mm centres, sized from duty inputs"
+        ),
+        approval_text=arguments.approve,
+        source_path=None,
+    )
+
+    design_root = Path(str(started["design_root"]))
+    record = design_root / "gear_sizing.json"
+    payload = json.dumps(sizing, ensure_ascii=False, sort_keys=True, indent=2)
+    if record.is_file():
+        atomic_replace(record, payload.encode("utf-8"))
+    else:
+        atomic_publish_new(record, payload.encode("utf-8"))
+
+    with freecad_scripts_directory() as scripts:
+        completed = run_freecad_script(
+            settings.freecadcmd,
+            scripts / "create_gear_pair.py",
+            [design_root / "model.FCStd", record],
+            timeout_seconds=600,
+            expected_sha256=settings.freecadcmd_sha256,
+            expected_identity=settings.freecadcmd_identity,
+            controlled_directory=design_root,
+        )
+    if completed.returncode != 0:
+        diagnostic = (completed.stderr + "\n" + completed.stdout)[-2000:]
+        raise RuntimeError(f"FreeCAD could not build the gear pair: {diagnostic}")
+
+    return {
+        "schema_version": "GearBuildResult/v1",
+        "status": "built",
+        "decision_state": decision,
+        "design_id": arguments.design_id,
+        "built": True,
+        "design_root": str(design_root),
+        "model_path": str(design_root / "model.FCStd"),
+        "sizing_record": str(record),
+        "build_variables": {
+            "module_mm": geometry["module_mm"],
+            "pinion_teeth": teeth["pinion"],
+            "gear_teeth": teeth["gear"],
+            "face_width_mm": geometry["face_width_mm"],
+            "centre_distance_mm": geometry["centre_distance_mm"],
+            "bore_mm": sizing["derived"]["shaft"]["selected_diameter_mm"],
+        },
+        "next_action": "validate_the_model_and_record_the_result",
+    }
+
+
+def _gear_exit_code(result: dict[str, object]) -> int:
+    status = result.get("status")
+    if status == "sized":
+        return 1 if result.get("warnings") else 0
+    if status == "built":
+        return 0
+    if status == "not_approved":
+        # Nothing was modelled and nothing is wrong; the design is waiting on
+        # a decision, which is a warning rather than a failure.
+        return 1
+    return 3
+
+
 def _family_service(runtime: BootstrapRuntime) -> ProductFamilyKnowledgeService:
     settings = runtime.knowledge_settings()
     return ProductFamilyKnowledgeService(settings.workspace, build_repository(settings))
@@ -602,6 +826,14 @@ def main() -> None:
             )
         elif arguments.command == "design":
             result = _design_command(arguments)
+        elif arguments.command == "gear":
+            result = (
+                _gear_build_command(arguments)
+                if arguments.gear_command == "build"
+                else _gear_command(arguments)
+            )
+            _print(result)
+            raise SystemExit(_gear_exit_code(result))
         elif arguments.command == "family":
             result = _family_command(arguments)
         elif arguments.standard_command == "providers":
@@ -624,6 +856,9 @@ def main() -> None:
     except BootstrapFailure as exc:
         _print(exc.as_dict())
         raise SystemExit(_exit_code(exc.as_dict())) from None
+    except GearSizingError as exc:
+        _print(exc.as_dict())
+        raise SystemExit(3) from None
     except Exception as exc:
         value = {
             "schema_version": "MechanicalDesignCommandError/v1",

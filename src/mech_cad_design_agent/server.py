@@ -16,6 +16,7 @@ from .bootstrap_runtime import BootstrapRuntime
 from .design_knowledge import DesignKnowledgeService
 from .design_lesson_workflow import DesignLessonWorkflow
 from .design_session import DesignSessionService
+from .gear_sizing import GearDriveInput, size_gear_drive, to_mapping
 from .knowledge_backend import build_repository
 from .knowledge_service import KnowledgeService
 from .projection import Neo4jProjection
@@ -294,6 +295,41 @@ def create_mcp(
     def design_mistakes(design_id: str) -> str:
         """Report validation defects this design corrected or still carries."""
         return _tool_call(lambda: get_design_reader().correction_summary(design_id))
+
+    @registrar.tool()
+    def design_gear_size(
+        power_kw: float,
+        pinion_speed_rpm: float,
+        gear_speed_rpm: float,
+        pinion_material: str,
+        gear_material: str,
+        duty: str,
+        life_hours: float,
+        safety_factor: float,
+        options_json: str = "{}",
+    ) -> str:
+        """Size a spur gear drive: ratio, teeth, module, forces, stresses, shaft, bearings.
+
+        Preliminary sizing evidence, not a strength certification. See the
+        result's limitations for what is not evaluated.
+        """
+        return _tool_call(
+            lambda: to_mapping(
+                size_gear_drive(
+                    GearDriveInput(
+                        power_kw=power_kw,
+                        pinion_speed_rpm=pinion_speed_rpm,
+                        gear_speed_rpm=gear_speed_rpm,
+                        pinion_material=pinion_material,
+                        gear_material=gear_material,
+                        duty=duty,
+                        life_hours=life_hours,
+                        safety_factor=safety_factor,
+                        **_object(options_json, "options_json"),
+                    )
+                )
+            )
+        )
 
     @registrar.tool()
     def design_confirm(

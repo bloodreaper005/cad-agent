@@ -28,6 +28,7 @@ EXPECTED_FREECAD_SHA256 = os.environ.get(
 ).strip().lower()
 EXPECTED_SCRIPTS = {
     "create_empty_model.py": "f0bf474d56ff1652786a0e53c168ba83beadc8369af867322d3a4cdaf892a062",
+    "create_gear_pair.py": "9b4e1db5d6045d1f21b10ba1ccc8a756f1ef7d4d2dc83d14e59d12734997faea",
     "extract_model_manifest.py": "cc63c6d6a9281259bb238c5c8d118115f3fb99c03b6a3ea09863bbe0ecfb267d",
     "normalize_model.py": "295de05c0f86a0fafd69df4911e101e3aaa326be86b999816c8a461f74a39a04",
     "validate_external_step.py": "f069b4c32b82c3a9016ba95e6dc59ceee4749c0b0501087c2992410d717ec7cd",

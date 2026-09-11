@@ -67,7 +67,9 @@ jobs:
             $skipped += [int]$suite.skipped
           }
           # Live database/GUI gates remain opt-in; second-volume tests run.
-          $expectedSkipped = 18
+          # 18 of these predate gear sizing; the other 4 are the live gear
+          # geometry tests, which need a reviewed FreeCADCmd to run.
+          $expectedSkipped = 22
           if ($failed -ne 0 -or $skipped -ne $expectedSkipped) {
             throw "Offline suite summary mismatch: failed=$failed skipped=$skipped"
           }

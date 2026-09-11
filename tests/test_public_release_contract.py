@@ -309,7 +309,9 @@ def test_public_windows_workflow_is_immutable_and_noninteractive() -> None:
         "pytest -q",
         "--junitxml=windows-public-offline.xml",
         "--junitxml=windows-public-boundary.xml",
-        "$expectedSkipped = 18",
+        # 18 pre-existing opt-in gates plus the 4 live gear geometry tests,
+        # which need a reviewed FreeCADCmd that CI does not configure.
+        "$expectedSkipped = 22",
         "$expectedSkipped = 3",
         "$failed -ne 0 -or $skipped -ne $expectedSkipped",
         "uv build --offline",

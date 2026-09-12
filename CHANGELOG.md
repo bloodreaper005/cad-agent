@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### General mechanical calculation
+
+- Add `mechanics/`, a standard-library package implementing Shigley's Mechanical Engineering Design (Budynas and Nisbett) independently of any one component. Gears were never special: a shaft, a bolted joint and a bracket all reduce to a stress state rated against a static or a fatigue criterion, and that reduction now lives in one place instead of inside the gear engine.
+- Chapter 3, load and stress analysis: the full three-dimensional stress state, principal stresses from the characteristic cubic, von Mises, Mohr quantities, the elementary load cases, section properties, and thin- and thick-walled cylinders.
+- Chapter 5, static failure: maximum-shear, distortion-energy and ductile Coulomb-Mohr for ductile materials; maximum-normal, brittle Coulomb-Mohr and modified-Mohr for brittle ones. A theory returns the factor of safety it computed and never raises on a failing margin, because the margin is the answer.
+- Chapter 6, fatigue: the Marin factors, corrected endurance limit, the finite-life S-N line, notch sensitivity and fatigue stress concentration, and the Goodman, Gerber, ASME-elliptic, Soderberg and Morrow criteria, each reported alongside the first-cycle yield check.
+- Chapter 8, bolted joints: tensile-stress area, metric coarse-thread and property-class tables, bolt and Wileman member stiffness, the joint constant, recommended preload and tightening torque, and the yielding, overload and separation margins together. This is the calculation half of the fastener gate the model validator already enforces geometrically: the validator proves a bolt is installed correctly and cannot prove the joint will hold.
+- Solve the principal-stress cubic by deflating the best-conditioned root and closing the remaining quadratic in closed form. The trigonometric solution alone loses about half its significant digits at a repeated root, and a repeated root is the ordinary case: uniaxial tension, pure shear and every plane-stress state has one. Uniaxial tension now returns exactly its applied stress and two zeros.
+- Take the size factor as `(d/7.62)^-0.107` rather than the rounded `1.24 d^-0.107` the text also prints, because only the first is exactly one at the rotating-beam specimen the factor is defined against; the rounded form returns 0.9978 there.
+- State the fatigue-strength fraction of figure 6-18 and the Neuber constant of equation 6-35 as curve fits that could not be verified against the published figures, and accept an explicit override for both. Every other shipped constant is checked against an independent anchor, including the whole metric coarse-thread series, whose tabulated areas are reproduced from the stress-area formula to within 0.4 percent.
+
 ## 0.10.0 - 2026-09-11
 
 ### Host-verified model evidence

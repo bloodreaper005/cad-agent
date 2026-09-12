@@ -42,7 +42,7 @@ jobs:
           # exact skip number is brittle here in a way it is not on the Windows
           # certification host. What must not change silently is how many tests
           # exist at all, and collection does not depend on the environment.
-          expected_collected = 700
+          expected_collected = 781
           root = ET.parse("macos-public-offline.xml").getroot()
           suites = root.findall("testsuite") or [root]
           collected = sum(int(s.get("tests", 0)) for s in suites)

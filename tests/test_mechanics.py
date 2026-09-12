@@ -8,13 +8,17 @@ that only restates the implementation proves nothing, so there are none here.
 
 from __future__ import annotations
 
-from math import inf, isinf, sqrt
+from math import exp, inf, isinf, pi, radians, sqrt, tan
 
 import pytest
 
 from mech_cad_design_agent.mechanics import bearings
 from mech_cad_design_agent.mechanics import bolted_joints as bolts
 from mech_cad_design_agent.mechanics import deflection
+from mech_cad_design_agent.mechanics import friction_drives
+from mech_cad_design_agent.mechanics import gears
+from mech_cad_design_agent.mechanics import journal_bearings
+from mech_cad_design_agent.mechanics import welds
 from mech_cad_design_agent.mechanics import shafts
 from mech_cad_design_agent.mechanics import springs
 from mech_cad_design_agent.mechanics import fatigue
@@ -765,3 +769,326 @@ def test_an_unloaded_bearing_is_refused_rather_than_rated() -> None:
             radial_n=0.0, speed_rpm=1200.0, design_life_hours=20000.0
         )
     assert excinfo.value.code == "input.incomplete"
+
+
+# --- Chapters 13 to 15, gears ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "pressure_angle_deg, expected",
+    [(14.5, 32.0), (20.0, 17.1), (25.0, 11.2)],
+)
+def test_the_rack_interference_limit_matches_the_published_values(
+    pressure_angle_deg: float, expected: float
+) -> None:
+    """The origin of the familiar eighteen-tooth rule at twenty degrees."""
+    assert gears.smallest_pinion_with_rack(
+        pressure_angle_deg=pressure_angle_deg
+    ) == pytest.approx(expected, rel=0.01)
+
+
+def test_a_pinion_large_enough_for_a_rack_has_no_upper_gear_limit() -> None:
+    """A rack is the limit of an infinitely large gear, so the bound vanishes."""
+    assert gears.largest_gear_without_interference(pinion_teeth=18) == inf
+    assert gears.largest_gear_without_interference(pinion_teeth=13) == pytest.approx(
+        16.5, rel=0.02
+    )
+
+
+def test_contact_ratio_of_a_normal_spur_pair_is_between_one_and_two() -> None:
+    ratio = gears.contact_ratio(module_mm=3.0, pinion_teeth=17, gear_teeth=52)
+    assert 1.2 < ratio < 2.0
+
+
+def test_a_helical_gear_at_zero_helix_reduces_to_a_spur_gear() -> None:
+    """The check that the transverse and normal planes are related correctly."""
+    helical = gears.helical_geometry(
+        normal_module_mm=3.0, teeth=20, helix_angle_deg=0.0
+    )
+    assert helical.transverse_module_mm == pytest.approx(3.0)
+    assert helical.transverse_pressure_angle_deg == pytest.approx(20.0)
+    assert helical.virtual_teeth == pytest.approx(20.0)
+
+
+def test_a_helix_raises_the_transverse_pressure_angle_and_the_tooth_count() -> None:
+    helical = gears.helical_geometry(
+        normal_module_mm=3.0, teeth=20, helix_angle_deg=30.0
+    )
+    assert helical.transverse_pressure_angle_deg > 20.0
+    assert helical.virtual_teeth == pytest.approx(20.0 / (sqrt(3.0) / 2.0) ** 3)
+
+
+def test_helical_forces_reduce_to_spur_forces_at_zero_helix() -> None:
+    common = dict(torque_nmm=49392.9, pitch_diameter_mm=51.0)
+    spur = gears.spur_forces(**common)
+    helical = gears.helical_forces(helix_angle_deg=0.0, **common)
+    assert helical.tangential_n == pytest.approx(spur.tangential_n)
+    assert helical.radial_n == pytest.approx(spur.radial_n)
+    assert helical.axial_n == pytest.approx(0.0, abs=1e-9)
+
+
+def test_a_helix_introduces_thrust_a_spur_mesh_does_not_have() -> None:
+    """The bearing consequence of choosing helical gearing."""
+    helical = gears.helical_forces(
+        torque_nmm=49392.9, pitch_diameter_mm=51.0, helix_angle_deg=30.0
+    )
+    assert helical.axial_n == pytest.approx(
+        helical.tangential_n * tan(radians(30.0))
+    )
+
+
+def test_bevel_pitch_angles_are_complementary_for_a_right_angle_pair() -> None:
+    pinion, gear = gears.bevel_pitch_angles_deg(17, 52)
+    assert pinion + gear == pytest.approx(90.0)
+
+
+def test_worm_ratio_comes_from_starts_not_diameter() -> None:
+    """The property that makes a worm drive compact at high ratio."""
+    geometry = gears.worm_geometry(
+        axial_module_mm=4.0,
+        worm_starts=2,
+        gear_teeth=40,
+        worm_pitch_diameter_mm=50.0,
+    )
+    assert geometry.ratio == pytest.approx(20.0)
+    assert geometry.lead_mm == pytest.approx(pi * 4.0 * 2.0)
+
+
+def test_worm_efficiency_rises_with_lead_angle() -> None:
+    low = gears.worm_efficiency(lead_angle_deg=5.0, friction_coefficient=0.05)
+    high = gears.worm_efficiency(lead_angle_deg=25.0, friction_coefficient=0.05)
+    assert 0.0 < low < high < 1.0
+
+
+def test_a_shallow_worm_self_locks_and_a_steep_one_does_not() -> None:
+    assert gears.worm_self_locking(lead_angle_deg=2.0, friction_coefficient=0.10)
+    assert not gears.worm_self_locking(lead_angle_deg=25.0, friction_coefficient=0.05)
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1.5, 3.058823529411765, 5.0, 10.0])
+@pytest.mark.parametrize("angle", [14.5, 20.0, 25.0])
+def test_the_geometry_factor_agrees_with_the_verified_spur_implementation(
+    ratio: float, angle: float
+) -> None:
+    """Cross-check against code already anchored to published ISO values.
+
+    The gear_sizing implementation is verified against the ISO 6336-3 chart, so
+    agreement here inherits that anchor rather than asserting a fresh number.
+    """
+    from mech_cad_design_agent.gear_sizing.tooth_form import contact_geometry_factor
+
+    mine = gears.external_geometry_factor_i(
+        gear_ratio_m=ratio, transverse_pressure_angle_deg=angle
+    )
+    assert mine == pytest.approx(contact_geometry_factor(radians(angle), ratio))
+
+
+def test_an_idler_changes_direction_without_changing_ratio() -> None:
+    direct = gears.train_value(driving_teeth=(20,), driven_teeth=(60,))
+    through_idler = gears.train_value(driving_teeth=(20, 35), driven_teeth=(35, 60))
+    assert direct == pytest.approx(through_idler)
+
+
+def test_a_fractional_tooth_count_is_refused() -> None:
+    with pytest.raises(MechanicsError) as excinfo:
+        gears.pitch_diameter_mm(3.0, 17.5)  # type: ignore[arg-type]
+    assert excinfo.value.code == "input.not_an_integer"
+
+
+# --- Chapter 9, welds -------------------------------------------------------
+
+
+def test_the_throat_is_the_leg_times_cos_forty_five() -> None:
+    assert welds.throat_mm(10.0) == pytest.approx(7.07)
+
+
+def test_direct_shear_is_the_load_over_the_throat_area() -> None:
+    group = welds.parallel_fillets(length_mm=100.0, separation_mm=50.0)
+    result = welds.evaluate_fillet_weld(
+        group=group, leg_mm=8.0, shear_force_n=20000.0
+    )
+    assert result.primary_shear_mpa == pytest.approx(
+        20000.0 / (0.707 * 8.0 * 200.0)
+    )
+    assert result.secondary_shear_mpa == 0.0
+
+
+def test_doubling_the_weld_leg_halves_the_stress() -> None:
+    group = welds.parallel_fillets(length_mm=100.0, separation_mm=50.0)
+    common = dict(group=group, shear_force_n=20000.0)
+    small = welds.evaluate_fillet_weld(leg_mm=8.0, **common)
+    large = welds.evaluate_fillet_weld(leg_mm=16.0, **common)
+    assert large.resultant_shear_mpa == pytest.approx(
+        small.resultant_shear_mpa / 2.0
+    )
+
+
+def test_electrode_strength_sets_the_allowable_shear() -> None:
+    assert welds.allowable_shear_mpa("E70xx") == pytest.approx(0.30 * 482.0)
+    assert welds.allowable_shear_mpa("E60xx") < welds.allowable_shear_mpa("E120xx")
+
+
+def test_an_unknown_electrode_is_refused() -> None:
+    with pytest.raises(MechanicsError) as excinfo:
+        welds.electrode("E75xx")
+    assert excinfo.value.code == "input.unknown_electrode"
+
+
+# --- Chapters 16 and 17, friction drives ------------------------------------
+
+
+def test_uniform_wear_is_the_conservative_clutch_model() -> None:
+    """Which is why the text designs to it: a worn clutch carries less."""
+    common = dict(
+        outer_diameter_mm=200.0,
+        inner_diameter_mm=120.0,
+        maximum_pressure_mpa=1.0,
+        friction_coefficient=0.3,
+    )
+    wear = friction_drives.uniform_wear_clutch(**common)
+    pressure = friction_drives.uniform_pressure_clutch(**common)
+    assert wear.torque_capacity_nmm < pressure.torque_capacity_nmm
+    assert wear.axial_force_n < pressure.axial_force_n
+
+
+def test_the_closed_form_clutch_optimum_maximises_the_computed_torque() -> None:
+    """A closed form checked against a search over the function it optimises."""
+    outer = 200.0
+    closed_form = friction_drives.optimum_inner_diameter_mm(outer)
+    assert closed_form == pytest.approx(outer / sqrt(3.0))
+
+    def torque(inner: float) -> float:
+        return friction_drives.uniform_wear_clutch(
+            outer_diameter_mm=outer,
+            inner_diameter_mm=inner,
+            maximum_pressure_mpa=1.0,
+            friction_coefficient=0.3,
+        ).torque_capacity_nmm
+
+    best = max((x * 0.5 for x in range(40, 399)), key=torque)
+    assert best == pytest.approx(closed_form, rel=0.01)
+
+
+def test_the_belt_equation_is_the_exponential_of_friction_times_wrap() -> None:
+    assert friction_drives.belt_tension_ratio(
+        friction_coefficient=0.3, wrap_angle_deg=180.0
+    ) == pytest.approx(exp(0.3 * pi))
+
+
+def test_a_vee_groove_multiplies_the_effective_friction() -> None:
+    """The wedge, not the material, is why a V belt out-pulls a flat one."""
+    flat = friction_drives.belt_tension_ratio(
+        friction_coefficient=0.3, wrap_angle_deg=180.0
+    )
+    vee = friction_drives.belt_tension_ratio(
+        friction_coefficient=0.3, wrap_angle_deg=180.0, groove_angle_deg=38.0
+    )
+    assert vee > 5.0 * flat
+
+
+def test_open_belt_wrap_angles_are_supplementary() -> None:
+    small, large, _ = friction_drives.open_belt_geometry(
+        small_pulley_diameter_mm=150.0,
+        large_pulley_diameter_mm=400.0,
+        centre_distance_mm=800.0,
+    )
+    assert small + large == pytest.approx(360.0)
+    assert small < 180.0 < large
+
+
+def test_equal_pulleys_give_half_wrap_and_the_elementary_belt_length() -> None:
+    small, large, length = friction_drives.open_belt_geometry(
+        small_pulley_diameter_mm=200.0,
+        large_pulley_diameter_mm=200.0,
+        centre_distance_mm=500.0,
+    )
+    assert small == pytest.approx(180.0)
+    assert large == pytest.approx(180.0)
+    assert length == pytest.approx(2.0 * 500.0 + pi * 200.0)
+
+
+def test_the_belt_tensions_deliver_exactly_the_requested_power() -> None:
+    drive = friction_drives.evaluate_belt_drive(
+        power_w=7500.0,
+        small_pulley_diameter_mm=150.0,
+        large_pulley_diameter_mm=400.0,
+        centre_distance_mm=800.0,
+        small_pulley_rpm=1450.0,
+        mass_per_length_kg_per_m=0.25,
+        groove_angle_deg=38.0,
+    )
+    assert (
+        drive.tight_side_n - drive.slack_side_n
+    ) * drive.belt_speed_m_per_s == pytest.approx(7500.0)
+    assert drive.centrifugal_tension_n > 0.0
+
+
+def test_overlapping_pulleys_are_refused() -> None:
+    with pytest.raises(MechanicsError) as excinfo:
+        friction_drives.open_belt_geometry(
+            small_pulley_diameter_mm=100.0,
+            large_pulley_diameter_mm=400.0,
+            centre_distance_mm=100.0,
+        )
+    assert excinfo.value.code == "input.out_of_range"
+
+
+def test_flywheel_inertia_scales_inversely_with_permitted_fluctuation() -> None:
+    common = dict(energy_fluctuation_j=1000.0, mean_speed_rad_per_s=100.0)
+    loose = friction_drives.flywheel_inertia_kg_m2(
+        coefficient_of_speed_fluctuation=0.05, **common
+    )
+    tight = friction_drives.flywheel_inertia_kg_m2(
+        coefficient_of_speed_fluctuation=0.01, **common
+    )
+    assert tight == pytest.approx(5.0 * loose)
+
+
+# --- Chapter 12, journal bearings -------------------------------------------
+
+
+def test_clearance_and_unit_load_follow_their_definitions() -> None:
+    assert journal_bearings.radial_clearance_mm(50.0, 50.1) == pytest.approx(0.05)
+    assert journal_bearings.unit_load_mpa(
+        radial_load_n=4000.0, journal_diameter_mm=50.0, length_mm=50.0
+    ) == pytest.approx(1.6)
+
+
+def test_a_bearing_bore_smaller_than_its_journal_is_refused() -> None:
+    with pytest.raises(MechanicsError) as excinfo:
+        journal_bearings.radial_clearance_mm(50.0, 49.9)
+    assert excinfo.value.code == "input.out_of_range"
+
+
+def test_the_estimate_names_the_chart_variables_it_could_not_compute() -> None:
+    """The boundary of what was calculated is part of the result.
+
+    Raimondi and Boyd solved the Reynolds equation numerically and published
+    charts. Those cannot be reproduced from their printed form, so the estimate
+    says which quantities still need them rather than inventing fits.
+    """
+    estimate = journal_bearings.estimate(
+        radial_load_n=4000.0,
+        journal_diameter_mm=50.0,
+        bearing_diameter_mm=50.1,
+        length_mm=50.0,
+        viscosity_pa_s=0.05,
+        speed_rev_per_s=30.0,
+    )
+    assert estimate.sommerfeld_number > 0.0
+    assert estimate.friction_power_w > 0.0
+    assert len(estimate.chart_variables_required) == 5
+
+
+def test_minimum_film_thickness_vanishes_as_eccentricity_approaches_one() -> None:
+    thick = journal_bearings.minimum_film_thickness_mm(
+        radial_clearance_mm=0.05, eccentricity_ratio=0.2
+    )
+    thin = journal_bearings.minimum_film_thickness_mm(
+        radial_clearance_mm=0.05, eccentricity_ratio=0.9
+    )
+    assert thick > thin > 0.0
+    with pytest.raises(MechanicsError):
+        journal_bearings.minimum_film_thickness_mm(
+            radial_clearance_mm=0.05, eccentricity_ratio=1.0
+        )

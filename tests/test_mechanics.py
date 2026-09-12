@@ -12,7 +12,11 @@ from math import inf, isinf, sqrt
 
 import pytest
 
+from mech_cad_design_agent.mechanics import bearings
 from mech_cad_design_agent.mechanics import bolted_joints as bolts
+from mech_cad_design_agent.mechanics import deflection
+from mech_cad_design_agent.mechanics import shafts
+from mech_cad_design_agent.mechanics import springs
 from mech_cad_design_agent.mechanics import fatigue
 from mech_cad_design_agent.mechanics import static_failure as static
 from mech_cad_design_agent.mechanics import stress
@@ -455,3 +459,309 @@ def test_property_classes_are_internally_consistent() -> None:
     """Proof below yield below ultimate, for every class that ships."""
     for name, values in bolts.METRIC_PROPERTY_CLASSES.items():
         assert values["proof_mpa"] < values["yield_mpa"] < values["ultimate_mpa"], name
+
+
+# --- Chapter 4, deflection and columns --------------------------------------
+
+
+def test_beam_cases_match_their_closed_forms() -> None:
+    modulus = 207000.0
+    inertia = stress.round_section_inertia_mm4(20.0)
+    common = dict(length_mm=500.0, elastic_modulus_mpa=modulus, inertia_mm4=inertia)
+    assert deflection.cantilever_end_load_deflection_mm(
+        force_n=1000.0, **common
+    ) == pytest.approx(1000.0 * 500.0**3 / (3.0 * modulus * inertia))
+    assert deflection.simply_supported_center_load_deflection_mm(
+        force_n=1000.0, **common
+    ) == pytest.approx(1000.0 * 500.0**3 / (48.0 * modulus * inertia))
+
+
+def test_the_offset_load_formula_reduces_to_the_centre_load_case() -> None:
+    """An independent check on the general case, which is easy to get wrong.
+
+    The maximum deflection under an intermediate load does not occur beneath
+    the load, so the general expression differs in form from the central one and
+    must still agree with it at midspan.
+    """
+    common = dict(
+        length_mm=500.0, elastic_modulus_mpa=207000.0, inertia_mm4=8000.0, force_n=900.0
+    )
+    offset = deflection.simply_supported_offset_load_deflection_mm(
+        distance_from_left_mm=250.0, **common
+    )
+    centre = deflection.simply_supported_center_load_deflection_mm(**common)
+    assert offset == pytest.approx(centre, rel=1e-12)
+
+
+def test_a_distributed_load_deflects_less_than_the_same_load_concentrated() -> None:
+    common = dict(length_mm=500.0, elastic_modulus_mpa=207000.0, inertia_mm4=8000.0)
+    spread = deflection.simply_supported_uniform_load_deflection_mm(
+        load_n_per_mm=2.0, **common
+    )
+    concentrated = deflection.simply_supported_center_load_deflection_mm(
+        force_n=1000.0, **common
+    )
+    assert spread < concentrated
+
+
+def test_springs_combine_the_way_stiffnesses_must() -> None:
+    assert deflection.series_stiffness(100.0, 100.0) == pytest.approx(50.0)
+    assert deflection.parallel_stiffness(100.0, 100.0) == pytest.approx(200.0)
+    assert deflection.series_stiffness(100.0) == pytest.approx(100.0)
+
+
+def test_euler_and_johnson_are_tangent_at_the_transition_slenderness() -> None:
+    """The defining property of the transition, and the check that locates it.
+
+    If the two curves do not meet exactly at the computed slenderness then the
+    transition is misplaced, and a column near it is rated by the wrong formula
+    in the unconservative direction.
+    """
+    yield_strength, modulus, area = 400.0, 207000.0, 706.858
+    transition = deflection.transition_slenderness(yield_strength, modulus)
+    euler = deflection.euler_critical_load_n(
+        area_mm2=area, slenderness=transition, elastic_modulus_mpa=modulus
+    )
+    johnson = deflection.johnson_critical_load_n(
+        area_mm2=area,
+        slenderness=transition,
+        yield_strength_mpa=yield_strength,
+        elastic_modulus_mpa=modulus,
+    )
+    assert euler == pytest.approx(johnson, rel=1e-9)
+
+
+def test_a_short_column_squashes_at_the_yield_load() -> None:
+    area = 706.858
+    load = deflection.johnson_critical_load_n(
+        area_mm2=area,
+        slenderness=1e-9,
+        yield_strength_mpa=400.0,
+        elastic_modulus_mpa=207000.0,
+    )
+    assert load == pytest.approx(400.0 * area)
+
+
+def test_a_slender_column_is_rated_by_euler_and_a_stubby_one_by_johnson() -> None:
+    common = dict(
+        area_mm2=706.858,
+        inertia_mm4=stress.round_section_inertia_mm4(30.0),
+        yield_strength_mpa=400.0,
+        elastic_modulus_mpa=207000.0,
+        applied_load_n=50000.0,
+    )
+    assert deflection.evaluate_column(length_mm=2000.0, **common).formula == "euler"
+    assert deflection.evaluate_column(length_mm=150.0, **common).formula == "johnson"
+
+
+# --- Chapter 7, shafts ------------------------------------------------------
+
+
+@pytest.mark.parametrize("criterion", shafts.SHAFT_CRITERIA)
+def test_solving_for_a_diameter_and_rating_it_are_inverse_operations(
+    criterion: str,
+) -> None:
+    """The strongest available check on the shaft equations.
+
+    Sizing and rating are written from different rearrangements of the same
+    criterion, so a diameter solved for a required factor must rate back to that
+    factor exactly.
+    """
+    loading = shafts.rotating_shaft(
+        bending_moment_nmm=250000.0,
+        steady_torque_nmm=180000.0,
+        bending_kf=1.6,
+        torsion_kfs=1.3,
+    )
+    strengths = dict(
+        endurance_limit_mpa=220.0, ultimate_tensile_mpa=800.0, yield_strength_mpa=600.0
+    )
+    diameter = shafts.diameter_mm(
+        loading=loading, safety_factor=1.8, criterion=criterion, **strengths
+    )
+    rated = shafts.evaluate(
+        loading=loading, diameter_mm=diameter, criterion=criterion, **strengths
+    )
+    assert rated.fatigue_factor == pytest.approx(1.8, rel=1e-9)
+
+
+def test_soderberg_demands_the_largest_shaft_and_gerber_the_smallest() -> None:
+    loading = shafts.rotating_shaft(
+        bending_moment_nmm=250000.0, steady_torque_nmm=180000.0
+    )
+    strengths = dict(
+        endurance_limit_mpa=220.0, ultimate_tensile_mpa=800.0, yield_strength_mpa=600.0
+    )
+    sizes = {
+        criterion: shafts.diameter_mm(
+            loading=loading, safety_factor=1.8, criterion=criterion, **strengths
+        )
+        for criterion in shafts.SHAFT_CRITERIA
+    }
+    assert sizes["soderberg"] > sizes["goodman"] > sizes["gerber"]
+
+
+def test_a_rotating_shaft_puts_bending_in_the_alternating_term_only() -> None:
+    """Rotation is what makes a steady transverse load a fatigue problem."""
+    loading = shafts.rotating_shaft(
+        bending_moment_nmm=100000.0, steady_torque_nmm=50000.0
+    )
+    assert loading.midrange_moment_nmm == 0.0
+    assert loading.alternating_torque_nmm == 0.0
+    alternating, midrange = loading.von_mises_amplitudes_mpa(30.0)
+    assert alternating > 0.0 and midrange > 0.0
+
+
+def test_an_unloaded_shaft_implies_no_diameter_and_says_so() -> None:
+    with pytest.raises(MechanicsError) as excinfo:
+        shafts.diameter_mm(
+            loading=shafts.ShaftLoading(),
+            endurance_limit_mpa=220.0,
+            ultimate_tensile_mpa=800.0,
+            yield_strength_mpa=600.0,
+            safety_factor=2.0,
+        )
+    assert excinfo.value.code == "input.incomplete"
+
+
+# --- Chapter 10, springs ----------------------------------------------------
+
+
+def test_bergstrasser_and_wahl_agree_within_one_percent_over_the_usable_range() -> None:
+    """Two corrections for the same effect, published decades apart."""
+    for index in (4.0, 6.0, 8.0, 10.0, 12.0):
+        bergstrasser = springs.bergstrasser_factor(index)
+        wahl = springs.wahl_factor(index)
+        assert wahl == pytest.approx(bergstrasser, rel=0.015)
+
+
+def test_the_correction_factor_approaches_one_for_a_very_slack_spring() -> None:
+    assert springs.bergstrasser_factor(1000.0) == pytest.approx(1.0, abs=1e-2)
+
+
+@pytest.mark.parametrize(
+    "ends, active, solid",
+    [
+        ("plain", 10.0, 22.0),
+        ("plain_ground", 9.0, 20.0),
+        ("squared", 8.0, 22.0),
+        ("squared_ground", 8.0, 20.0),
+    ],
+)
+def test_end_treatments_follow_the_published_geometry(
+    ends: str, active: float, solid: float
+) -> None:
+    result = springs.geometry(
+        wire_diameter_mm=2.0, total_coils=10.0, pitch_mm=6.0, ends=ends
+    )
+    assert result["active_coils"] == pytest.approx(active)
+    assert result["solid_length_mm"] == pytest.approx(solid)
+
+
+def test_spring_rate_follows_the_fourth_power_of_wire_diameter() -> None:
+    common = dict(mean_diameter_mm=16.0, active_coils=8.0, shear_modulus_mpa=81700.0)
+    thin = springs.spring_rate_n_per_mm(wire_diameter_mm=2.0, **common)
+    thick = springs.spring_rate_n_per_mm(wire_diameter_mm=4.0, **common)
+    assert thick == pytest.approx(16.0 * thin)
+
+
+def test_wire_strength_outside_its_fitted_range_is_refused() -> None:
+    """The A/d^m relation is a fit, and the range is part of the constant."""
+    with pytest.raises(MechanicsError) as excinfo:
+        springs.wire_material("music_wire").ultimate_tensile_mpa(40.0)
+    assert excinfo.value.code == "input.out_of_range"
+
+
+def test_a_spring_is_rated_both_at_load_and_shut_solid() -> None:
+    result = springs.evaluate_compression_spring(
+        force_n=120.0,
+        wire_diameter_mm=2.5,
+        mean_diameter_mm=15.0,
+        total_coils=12.0,
+        pitch_mm=5.0,
+    )
+    assert result.spring_index == pytest.approx(6.0)
+    assert result.index_within_recommended_range is True
+    assert result.shear_stress_at_solid_mpa > result.shear_stress_at_load_mpa
+    assert result.factor_of_safety_at_solid < result.factor_of_safety_at_load
+
+
+def test_an_out_of_range_spring_index_is_reported_not_raised() -> None:
+    result = springs.evaluate_compression_spring(
+        force_n=50.0,
+        wire_diameter_mm=1.0,
+        mean_diameter_mm=20.0,
+        total_coils=12.0,
+        pitch_mm=4.0,
+    )
+    assert result.spring_index == pytest.approx(20.0)
+    assert result.index_within_recommended_range is False
+    assert result.safe is False
+
+
+# --- Chapter 11, bearings ---------------------------------------------------
+
+
+def test_rated_life_is_one_million_revolutions_at_the_catalogue_load() -> None:
+    """The definition of the basic dynamic load rating."""
+    assert bearings.life_revolutions(
+        dynamic_capacity_n=5000.0, equivalent_load_n=5000.0
+    ) == pytest.approx(1e6)
+
+
+def test_ball_and_roller_life_exponents_are_distinct_and_correct() -> None:
+    doubled = dict(dynamic_capacity_n=10000.0, equivalent_load_n=5000.0)
+    assert bearings.life_revolutions(**doubled) == pytest.approx(8e6)
+    assert bearings.life_revolutions(
+        bearing_family="cylindrical_roller", **doubled
+    ) == pytest.approx(1e6 * 2.0 ** (10.0 / 3.0))
+
+
+def test_a_rotating_outer_ring_costs_capacity() -> None:
+    inner = bearings.equivalent_radial_load_n(radial_n=3000.0, rotation_factor=1.0)
+    outer = bearings.equivalent_radial_load_n(radial_n=3000.0, rotation_factor=1.2)
+    assert outer == pytest.approx(1.2 * inner)
+
+
+def test_a_small_axial_load_does_not_change_the_equivalent_load() -> None:
+    """Below the threshold e the thrust is carried without penalty."""
+    plain = bearings.equivalent_radial_load_n(radial_n=3000.0)
+    slight = bearings.equivalent_radial_load_n(radial_n=3000.0, axial_n=300.0)
+    assert slight == pytest.approx(plain)
+
+
+@pytest.mark.parametrize("reliability", [0.95, 0.96, 0.97, 0.98, 0.99])
+def test_the_weibull_model_reproduces_the_tabulated_iso_life_adjustment(
+    reliability: float,
+) -> None:
+    """Cross-check against a table that is already in this repository.
+
+    The three-parameter Weibull of equation 11-18 and the ISO 281 adjustment
+    factors used by the gear engine are independent records of the same
+    quantity, arrived at by different routes. They agree to within six percent
+    across the table, and to within one percent at the reliabilities most often
+    designed to.
+    """
+    from mech_cad_design_agent.gear_sizing.bearings import RELIABILITY_ADJUSTMENT
+
+    base = bearings.reliability_life_factor(0.90)
+    derived = bearings.reliability_life_factor(reliability) / base
+    assert derived == pytest.approx(RELIABILITY_ADJUSTMENT[reliability], rel=0.06)
+
+
+def test_a_higher_reliability_demands_a_larger_bearing() -> None:
+    common = dict(radial_n=3000.0, speed_rpm=1200.0, design_life_hours=20000.0)
+    ninety = bearings.required_dynamic_capacity_n(**common)
+    ninety_nine = bearings.required_dynamic_capacity_n(reliability=0.99, **common)
+    assert (
+        ninety_nine.required_dynamic_capacity_n
+        > ninety.required_dynamic_capacity_n
+    )
+
+
+def test_an_unloaded_bearing_is_refused_rather_than_rated() -> None:
+    with pytest.raises(MechanicsError) as excinfo:
+        bearings.required_dynamic_capacity_n(
+            radial_n=0.0, speed_rpm=1200.0, design_life_hours=20000.0
+        )
+    assert excinfo.value.code == "input.incomplete"

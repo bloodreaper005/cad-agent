@@ -22,7 +22,7 @@ PACKAGED_SCRIPT_DIGESTS: dict[str, str] = {
     "create_gear_pair.py": "db9af785e87f6653c6f4b16561d55d717a28362badbda4f6397ea701fb70d4e6",
     "extract_model_manifest.py": "cc63c6d6a9281259bb238c5c8d118115f3fb99c03b6a3ea09863bbe0ecfb267d",
     "normalize_model.py": "295de05c0f86a0fafd69df4911e101e3aaa326be86b999816c8a461f74a39a04",
-    "validate_external_step.py": "f069b4c32b82c3a9016ba95e6dc59ceee4749c0b0501087c2992410d717ec7cd",
+    "validate_external_step.py": "b4f356b0630b12cf18154bb1e2f3c6ff188d54f624395ea45af0cad20b157071",
     "validate_fastener_interfaces.py": "f447d6eb53b5715bceb056a38d64f0e539d35bc6adfb48a8c9b8d661fadfb6a1",
     "validate_mechanical_interfaces.py": "5bc857162ceeae569f17b02cb4db4c90e7c44cdc99f2a54f3add90003d923473",
     "validate_model.py": "e1ac0a683f15cf5c960476a33e7c29358057dd7272c618a6b3a06125baa01f96",

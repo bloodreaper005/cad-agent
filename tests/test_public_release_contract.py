@@ -176,10 +176,14 @@ def test_manifest_classifies_every_test_file_on_disk() -> None:
 def test_manifest_explicitly_excludes_private_development_content() -> None:
     manifest = load_public_repository_manifest(PROJECT_ROOT)
     excluded = set(manifest.excluded_private_paths)
+    # scripts/run_external_step_validation.py was listed here for a file that
+    # never existed in this repository's history. An exclusion for a phantom
+    # path excludes nothing and reads as coverage that is not there, so it is
+    # gone; excluded_private_paths is not existence-checked, which is why it
+    # went unnoticed.
     for path in (
         "config/product_families",
         "docs/superpowers",
-        "scripts/run_external_step_validation.py",
         "tests/test_private_public_release_gate.py",
         "tests/test_documentation.py",
         "tests/test_runtime_hardcode_packaging.py",

@@ -121,7 +121,6 @@ public_scripts = [
 excluded_private_paths = [
   "config/product_families",
   "docs/superpowers",
-  "scripts/run_external_step_validation.py",
   "tests/test_bootstrap_runtime.py",
   "tests/test_bootstrap_slice2_packaging.py",
   "tests/test_bootstrap_slice3_packaging.py",

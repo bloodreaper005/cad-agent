@@ -2,6 +2,31 @@
 
 Usage inside FreeCADCmd:
   freecadcmd validate_external_step.py STEP MANIFEST SPEC REPORT_DIR VALIDATOR_MODULE
+
+NOT WIRED IN. Nothing in this package calls this file, and it cannot run as
+shipped. Its digest is pinned and enforced like every other packaged script,
+which means only that the file is what the manifest says it is; it does not
+mean anything reaches it.
+
+Two things are missing, both known:
+
+  * VALIDATOR_MODULE is the skill's freecad_model_validation.py, and
+    .agents/skills/ is in neither the wheel nor the sdist, so on an installed
+    copy that argument has nothing to point at.
+  * validate_step() calls _save_snapshot() unconditionally, which needs
+    FreeCADGui. It catches its own failure but records visual.snapshot as a
+    mandatory failed check, so a headless run would report failed for a missing
+    render rather than for anything about the part.
+
+This file is the host-side half of STEP provenance validation, not an orphan.
+standard_parts.register_download currently accepts an agent-authored report for
+catalogue parts; the provider-neutral manifest checks below are exactly what it
+does not do for itself. Completing it means packaging the shared validator with
+a drift guard against the skill copy, making the snapshot check non-fatal
+without a GUI, and calling this through freecad_runner. That also yields
+host-run validate_fcstd, which is the same gap on the FCStd side.
+
+Until then this is documented unbuilt work rather than a capability.
 """
 from __future__ import annotations
 

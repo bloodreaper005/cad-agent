@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 
 from .bootstrap_diagnostics import DiagnosticGateError, blocked_response
+from .freecad_bridge_security import inspect_bridge_settings
 from .config import (
     POSTGRES_BACKEND,
     SQLITE_BACKEND,
@@ -216,6 +217,7 @@ class BootstrapRuntime:
                         "message": "FreeCADCmd is not ready",
                     }
                 )
+            components.append(inspect_bridge_settings().as_component())
         components.append(self._knowledge_component(manifest.workspace))
         overall = (
             "setup_required"
@@ -243,6 +245,16 @@ class BootstrapRuntime:
                     diagnostics=self.status(),
                 )
             ) from None
+        bridge = inspect_bridge_settings()
+        if not bridge.safe_to_proceed:
+            raise DiagnosticGateError(
+                blocked_response(
+                    capability="design",
+                    code=bridge.code,
+                    message=bridge.message,
+                    diagnostics=self.status(),
+                )
+            )
         return DesignSettings(
             workspace=manifest.workspace,
             package_root=manifest.workspace,

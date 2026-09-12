@@ -227,7 +227,12 @@ def test_design_start_reports_actionable_setup_diagnostics(
     assert result["code"] == "FREECADCMD_NOT_CONFIGURED"
     assert result["capability"] == "design"
     names = [item["name"] for item in result["diagnostics"]["components"]]
-    assert names == ["workspace", "freecadcmd", "knowledge"]
+    assert names == [
+        "workspace",
+        "freecadcmd",
+        "freecad_gui_bridge",
+        "knowledge",
+    ]
 
 
 def test_design_start_rejects_invalid_requirements_json(

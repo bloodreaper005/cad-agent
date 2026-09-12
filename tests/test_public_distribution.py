@@ -98,7 +98,7 @@ def test_public_metadata_and_license_contract() -> None:
         (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )["project"]
     assert project["name"] == "mech-cad-design-agent"
-    assert project["version"] == "0.10.0"
+    assert project["version"] == "0.11.0"
     assert project["description"] == (
         "AI mechanical CAD design, validation, reusable knowledge, and MCP "
         "tools for coding agents"
@@ -115,7 +115,7 @@ def test_public_metadata_and_license_contract() -> None:
 
 
 def test_release_version_is_exactly_0_9_0_everywhere() -> None:
-    expected = "0.10.0"
+    expected = "0.11.0"
     project = tomllib.loads(
         (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )["project"]
@@ -237,7 +237,7 @@ def test_wheel_metadata_license_and_entrypoints(
         assert "third-party-components.toml" not in names
 
     assert metadata["Name"] == "mech-cad-design-agent"
-    assert metadata["Version"] == "0.10.0"
+    assert metadata["Version"] == "0.11.0"
     assert metadata["Summary"] == (
         "AI mechanical CAD design, validation, reusable knowledge, and MCP "
         "tools for coding agents"
@@ -348,7 +348,7 @@ def test_sdist_rebuilds_and_imports_without_repository_access(
     )
     assert imported.returncode == 0, imported.stderr
     version, module_path = imported.stdout.splitlines()
-    assert version == "0.10.0"
+    assert version == "0.11.0"
     # Resolve both sides: on macOS the temporary root is reached through the
     # /var -> /private/var symlink, while __file__ reports the resolved path.
     assert Path(module_path).resolve().is_relative_to(venv.resolve())

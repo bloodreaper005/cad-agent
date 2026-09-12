@@ -13,7 +13,7 @@ from packaging.utils import canonicalize_name
 
 SCHEMA_VERSION = "ThirdPartyComponents/v1"
 PROJECT_DISTRIBUTION = "mech-cad-design-agent"
-PROJECT_VERSION = "0.10.0"
+PROJECT_VERSION = "0.11.0"
 TOP_LEVEL_FIELDS = {
     "schema_version",
     "project_distribution",

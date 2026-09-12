@@ -1,0 +1,100 @@
+name: macOS public checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  public-macos:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Select CPython 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install uv
+        shell: bash
+        run: python -m pip install --disable-pip-version-check uv==0.11.17
+      - name: Resolve the frozen test environment
+        shell: bash
+        run: uv sync --frozen --group test --python 3.12
+      - name: Run the complete non-interactive suite offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          export UV_OFFLINE=1
+          uv run --offline --python 3.12 pytest -q \
+            --junitxml=macos-public-offline.xml
+          python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          # Collected count rather than skip count. Which tests skip depends on
+          # what the runner happens to provide (pwsh, FreeCAD, a database), so an
+          # exact skip number is brittle here in a way it is not on the Windows
+          # certification host. What must not change silently is how many tests
+          # exist at all, and collection does not depend on the environment.
+          expected_collected = 700
+          root = ET.parse("macos-public-offline.xml").getroot()
+          suites = root.findall("testsuite") or [root]
+          collected = sum(int(s.get("tests", 0)) for s in suites)
+          failed = sum(
+              int(s.get("failures", 0)) + int(s.get("errors", 0)) for s in suites
+          )
+          skipped = sum(int(s.get("skipped", 0)) for s in suites)
+          print(f"collected={collected} failed={failed} skipped={skipped}")
+          if failed:
+              sys.exit(f"The public macOS offline suite failed: {failed} failures")
+          if collected != expected_collected:
+              sys.exit(
+                  f"Collected {collected} tests, expected {expected_collected}. "
+                  "Update the expected count in the same commit that adds or "
+                  "removes tests."
+              )
+          PY
+      - name: Build wheel and source distribution offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          export UV_OFFLINE=1
+          uv build --offline --wheel --sdist --out-dir dist
+      - name: Run public release boundary checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          export UV_OFFLINE=1
+          uv run --offline --python 3.12 pytest -q \
+            --junitxml=macos-public-boundary.xml \
+            tests/test_public_release_contract.py \
+            tests/test_public_distribution.py \
+            tests/test_public_documentation.py \
+            tests/test_third_party_licensing.py \
+            tests/test_windows_release_evidence.py \
+            tests/test_windows_packaging.py
+          python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          expected_collected = 90
+          root = ET.parse("macos-public-boundary.xml").getroot()
+          suites = root.findall("testsuite") or [root]
+          collected = sum(int(s.get("tests", 0)) for s in suites)
+          failed = sum(
+              int(s.get("failures", 0)) + int(s.get("errors", 0)) for s in suites
+          )
+          print(f"collected={collected} failed={failed}")
+          if failed:
+              sys.exit(f"The public macOS release-boundary suite failed: {failed}")
+          if collected != expected_collected:
+              sys.exit(
+                  f"Collected {collected} boundary tests, expected {expected_collected}"
+              )
+          PY

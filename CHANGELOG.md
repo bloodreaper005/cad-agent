@@ -4,6 +4,9 @@
 
 ### General mechanical calculation
 
+- Source the gear engine's Marin factors and bearing-family table from `mechanics` instead of holding second copies. `gear_sizing` now imports the endurance limit, surface factor, size factor and reliability table from `mechanics.fatigue`, and derives its bearing coefficients from `mechanics.bearings`. The dependency runs one way only, from `gear_sizing` to `mechanics`.
+- The exact `(d/7.62)^-0.107` size factor raises the worked example's shaft endurance limit by 0.22 percent and shrinks its solved Goodman diameter by 0.06 percent, from 21.042 to 21.030 mm. The selected shaft diameter is unchanged at 25 mm because ISO 15 bore rounding absorbs the difference, so no built design moves; the tooth counts, module, face width, centre distance, every strength result and the bearing capacity are all byte-identical.
+
 - Add `mechanics/`, a standard-library package implementing Shigley's Mechanical Engineering Design (Budynas and Nisbett) independently of any one component. Gears were never special: a shaft, a bolted joint and a bracket all reduce to a stress state rated against a static or a fatigue criterion, and that reduction now lives in one place instead of inside the gear engine.
 - Chapter 3, load and stress analysis: the full three-dimensional stress state, principal stresses from the characteristic cubic, von Mises, Mohr quantities, the elementary load cases, section properties, and thin- and thick-walled cylinders.
 - Chapter 5, static failure: maximum-shear, distortion-energy and ductile Coulomb-Mohr for ductile materials; maximum-normal, brittle Coulomb-Mohr and modified-Mohr for brittle ones. A theory returns the factor of safety it computed and never raises on a failing margin, because the margin is the answer.

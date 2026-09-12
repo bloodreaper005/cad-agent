@@ -148,7 +148,13 @@ def test_worked_example_sizes_the_shaft_and_bearings() -> None:
     assert isclose(shaft["loads"]["bending_moment_nmm"], 59262.0, rel_tol=1e-4)
     assert isclose(shaft["allowable_shear_mpa"], 135.0, rel_tol=1e-9)
     assert isclose(shaft["asme_diameter_mm"], 17.406, rel_tol=1e-4)
-    assert isclose(shaft["goodman_diameter_mm"], 21.042, rel_tol=1e-4)
+    # 21.030 rather than the 21.042 this fixture held before the Marin factors
+    # moved into mechanics.fatigue. The size factor there is the exact
+    # (d/7.62)^-0.107 rather than the rounded 1.24 d^-0.107, which lifts the
+    # endurance limit by 0.22 percent and shrinks the solved diameter by 0.06.
+    # The selected diameter below is unchanged: ISO 15 rounding absorbs it, so
+    # the design that gets built is the same one.
+    assert isclose(shaft["goodman_diameter_mm"], 21.030, rel_tol=1e-4)
     assert shaft["selected_diameter_mm"] == 25.0
     assert isclose(shaft["loads"]["reaction_a_n"], 1030.6, rel_tol=1e-4)
 

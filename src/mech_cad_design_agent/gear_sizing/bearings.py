@@ -2,20 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..mechanics.bearings import BEARING_FAMILIES
 from .errors import GearSizingError
 
 
-# ISO 281 load exponent and equivalent-load coefficients by bearing family.
+# ISO 281 load exponent and equivalent-load coefficients by bearing family,
+# derived from the single copy in mechanics.bearings rather than repeated here.
 # For deep-groove ball bearings e and Y are functions of the axial load over
 # the static rating, which is unknown until a bearing is chosen. The values
-# here are mid-range placeholders; the output is a required capacity, never a
+# there are mid-range placeholders; the output is a required capacity, never a
 # selection. A spur mesh carries no axial load, so they do not bind here.
 BEARING_TYPES: dict[str, tuple[float, float, float, float]] = {
-    # key: (life exponent p, X, Y, e)
-    "deep_groove_ball": (3.0, 0.56, 1.5, 0.30),
-    "angular_contact_ball": (3.0, 0.41, 0.87, 1.14),
-    "cylindrical_roller": (10.0 / 3.0, 1.0, 0.0, float("inf")),
-    "tapered_roller": (10.0 / 3.0, 0.40, 1.60, 0.37),
+    name: (values["exponent"], values["x2"], values["y2"], values["e"])
+    for name, values in BEARING_FAMILIES.items()
 }
 
 # ISO 281 life adjustment for reliability above 90 percent.

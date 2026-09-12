@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import pi, sqrt
 
+from ..mechanics.fatigue import (
+    RELIABILITY_FACTORS,
+    endurance_limit_prime_mpa,
+    size_factor,
+    surface_factor,
+)
 from .errors import GearSizingError
 from .materials import ShaftMaterial
 from .standards import ISO15_BORE_SERIES, ceil_to_step, select_from_series
@@ -23,13 +29,13 @@ STRESS_CONCENTRATIONS: dict[str, tuple[float, float]] = {
     "shoulder_fillet": (1.70, 1.50),
 }
 
-# Reliability knock-down on the endurance limit, Shigley Table 6-5.
+# Reliability knock-down on the endurance limit, Shigley table 6-5. The table
+# itself now lives in mechanics.fatigue, which holds one copy for the whole
+# project; this restriction records which of its entries a shaft request may
+# select, since the sizing API resolves to the nearest tabulated reliability
+# rather than refusing an untabulated one.
 _RELIABILITY_ENDURANCE: dict[float, float] = {
-    0.50: 1.000,
-    0.90: 0.897,
-    0.95: 0.868,
-    0.99: 0.814,
-    0.999: 0.753,
+    value: RELIABILITY_FACTORS[value] for value in (0.50, 0.90, 0.95, 0.99, 0.999)
 }
 
 _MAX_ITERATIONS = 100
@@ -128,12 +134,9 @@ def endurance_limit_mpa(
     *, material: ShaftMaterial, diameter_mm: float, reliability: float
 ) -> float:
     tensile = material.tensile_strength_mpa
-    base = 0.5 * tensile if tensile <= 1400.0 else 700.0
-    surface = 4.51 * tensile**-0.265
-    if diameter_mm <= 51.0:
-        size = 1.24 * max(diameter_mm, 2.79) ** -0.107
-    else:
-        size = 1.51 * min(diameter_mm, 254.0) ** -0.157
+    base = endurance_limit_prime_mpa(tensile)
+    surface = surface_factor("machined", tensile)
+    size = size_factor(min(max(diameter_mm, 2.79), 254.0))
     closest = min(_RELIABILITY_ENDURANCE, key=lambda key: abs(key - reliability))
     return surface * size * _RELIABILITY_ENDURANCE[closest] * base
 

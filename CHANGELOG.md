@@ -4,6 +4,9 @@
 
 ### Execution trust
 
+- Port `validate_fastener_interfaces.py` and `validate_mechanical_interfaces.py` to run headlessly. Both imported `FreeCADGui` and drove `activeView()`, which tied them to a GUI session an agent was steering and left them packaged, digest-pinned and callable by nothing. They now take a model path rather than the name of an already-open document, open it hidden, close it again, and confirm the source bytes are unchanged, so they run under FreeCADCmd through the pinned runner. The geometry was always Part/OCCT; only the render needed the GUI.
+- Produce no PNG from those two validators and say so in the report, rather than naming an artifact that was never written. Visual review is a separate step of the validation workflow.
+
 - Check at runtime that the FreeCAD GUI bridge is loopback-only. The bridge executes arbitrary agent-authored Python, and the rule that it must run with `remote_enabled` false lived only in `AGENTS.md` and in live tests that never run on a user's machine. `mech-cad-design status` now reports the bridge, and a design that would run against a demonstrably remote-enabled bridge is blocked. The settings file has no fixed location, so it is read from `MECH_DESIGN_FREECAD_GUI_MCP_SETTINGS`; with that unset the check reports `unverified` rather than `ok`, and does not block.
 - Add `SECURITY.md`, naming the failure this project actually cares about, a model certified that should not have been, and recording the known limitations that are design properties rather than defects.
 

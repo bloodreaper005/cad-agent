@@ -13,7 +13,6 @@ import math
 from pathlib import Path
 
 import FreeCAD as App
-import FreeCADGui as Gui
 
 
 def _sha256(path: Path) -> str:
@@ -46,21 +45,37 @@ def _linked_value(obj, property_name):
     return str(getattr(linked, property_name, ""))
 
 
-def validate_fastener_interfaces(document_name, specification, report_dir):
+def validate_fastener_interfaces(model, specification, report_dir):
+    """Validate the interfaces of a model without needing the GUI.
+
+    Takes a path rather than the name of an already-open document, so it
+    runs under FreeCADCmd through the pinned runner instead of only
+    inside a GUI session the agent is driving. The document is opened
+    hidden and closed again, and the source bytes are checked to be
+    unchanged, because a validator that edits what it measures is worse
+    than no validator.
+    """
     spec_path = Path(specification).expanduser().resolve()
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     output = Path(report_dir).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
-    doc = App.getDocument(document_name)
-    if doc is None:
-        raise RuntimeError(f"FreeCAD document is not open: {document_name}")
-    model_path = Path(doc.FileName).resolve()
+    model_path = Path(model).expanduser().resolve(strict=True)
+    before = _sha256(model_path)
+    doc = App.openDocument(str(model_path), hidden=True)
+    document_name = doc.Name
+    try:
+        return _build_report(doc, document_name, model_path, before, spec, output)
+    finally:
+        App.closeDocument(doc.Name)
+
+
+def _build_report(doc, document_name, model_path, before, spec, output):
     report = {
         "schema_version": "FastenerInterfaceValidation/v1",
         "validator": "freecad-fastener-interface-validation",
         "document": document_name,
         "source": str(model_path),
-        "working_sha256": _sha256(model_path),
+        "working_sha256": before,
         "validated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "checks": [],
         "interfaces": [],
@@ -179,14 +194,24 @@ def validate_fastener_interfaces(document_name, specification, report_dir):
     report["status"] = "passed" if not failures else "failed"
     json_path = output / "fastener-interface-validation.json"
     md_path = output / "fastener-interface-validation.md"
-    png_path = output / "fastener-interface-validation.png"
-    report["artifacts"] = {"json": str(json_path), "markdown": str(md_path), "png": str(png_path)}
+    # No PNG. Rendering needs FreeCADGui, which is what tied this
+    # validator to a GUI session; visual review is a separate step of the
+    # validation workflow and is not this file's job.
+    report["artifacts"] = {"json": str(json_path), "markdown": str(md_path)}
+    report["render"] = None
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     lines = ["# Fastener interface validation", "", f"Status: **{report['status']}**", "", f"Model SHA-256: `{report['working_sha256']}`", ""]
     for item in report["checks"]:
         lines.append(f"- **{item['status'].upper()}** `{item['id']}` — {item['message']}")
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    Gui.activeDocument().activeView().viewAxonometric()
-    Gui.activeDocument().activeView().fitAll()
-    Gui.activeDocument().activeView().saveImage(str(png_path), 1600, 1000, "Current")
+    if _sha256(model_path) != before:
+        raise RuntimeError("the model changed while it was being validated")
     return report
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) < 4:
+        raise SystemExit("usage: validate_fastener_interfaces.py MODEL SPEC REPORT_DIR")
+    validate_fastener_interfaces(sys.argv[-3], sys.argv[-2], sys.argv[-1])

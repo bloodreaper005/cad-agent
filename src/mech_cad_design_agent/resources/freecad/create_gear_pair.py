@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import sys
-from math import acos, cos, pi, sin, sqrt, tan
+from math import acos, cos, isfinite, pi, sin, sqrt, tan
 
 import FreeCAD as App
 import Part
@@ -118,6 +118,21 @@ def _stamp(obj, values: dict) -> None:
         setattr(obj, name, float(value))
 
 
+def _require(name: str, value, low: float, high: float) -> float:
+    """Bound one sizing value the geometry depends on.
+
+    The sizing engine already refuses these ranges, but a sizing document can
+    reach this script without having come from it, so the builder enforces the
+    same limits rather than trusting the file it was handed.
+    """
+    number = float(value)
+    if not isfinite(number) or not low <= number <= high:
+        raise ValueError(
+            f"{name} is outside the buildable range [{low}, {high}]: {value!r}"
+        )
+    return number
+
+
 def build(model_path: str, sizing_path: str) -> None:
     sizing = json.loads(open(sizing_path, "r", encoding="utf-8").read())
     if sizing.get("status") != "sized":
@@ -129,13 +144,20 @@ def build(model_path: str, sizing_path: str) -> None:
     geometry = sizing["derived"]["geometry"]
     shaft = sizing["derived"]["shaft"]
 
-    module_mm = float(geometry["module_mm"])
-    pressure_angle_rad = float(geometry["pressure_angle_rad"])
-    face_width_mm = float(geometry["face_width_mm"])
-    centre_distance_mm = float(geometry["centre_distance_mm"])
-    pinion_teeth = int(teeth["pinion"])
-    gear_teeth = int(teeth["gear"])
-    bore_mm = float(shaft["selected_diameter_mm"])
+    module_mm = _require("module_mm", geometry["module_mm"], 0.1, 50.0)
+    pressure_angle_rad = _require(
+        "pressure_angle_rad", geometry["pressure_angle_rad"], 0.24, 0.53
+    )
+    face_width_mm = _require("face_width_mm", geometry["face_width_mm"], 0.5, 2000.0)
+    centre_distance_mm = _require(
+        "centre_distance_mm", geometry["centre_distance_mm"], 0.1, 10000.0
+    )
+    pinion_teeth = int(_require("teeth.pinion", teeth["pinion"], 12, 400))
+    gear_teeth = int(_require("teeth.gear", teeth["gear"], 12, 400))
+    root_diameter_mm = module_mm * min(pinion_teeth, gear_teeth) - 2.5 * module_mm
+    bore_mm = _require(
+        "shaft.selected_diameter_mm", shaft["selected_diameter_mm"], 0.0, root_diameter_mm
+    )
 
     doc = App.openDocument(model_path)
     for obj in list(doc.Objects):

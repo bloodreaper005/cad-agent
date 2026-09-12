@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from io import BytesIO
 import json
+import struct
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 import uuid
@@ -149,6 +150,14 @@ def _validate_state(raw: object) -> dict[str, Any]:
     elif not isinstance(ledger, list):
         raise ValueError("design.json correction_ledger is invalid")
     return state
+
+
+_EXPECTED_VALIDATOR = "freecad-model-validation"
+_EXPECTED_REPORT_SCHEMA = 1
+_REQUIRED_CHECK_IDS = frozenset(
+    {"file.exists", "document.open", "document.recompute", "document.geometry"}
+)
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 class DesignSessionService:
@@ -910,6 +919,46 @@ class DesignSessionService:
             return "needs_attention", "incomplete", "validation report contract is incomplete", []
         if summary.get("fasteners_detected") != len(inventory):
             return "needs_attention", "incomplete", "fastener inventory count is inconsistent", []
+        if (
+            report.get("validator") != _EXPECTED_VALIDATOR
+            or report.get("schema_version") != _EXPECTED_REPORT_SCHEMA
+        ):
+            return (
+                "needs_attention",
+                "incomplete",
+                "validation report provenance is unrecognized",
+                [],
+            )
+        if not any(check.get("mandatory") is True for check in checks if isinstance(check, dict)):
+            return (
+                "needs_attention",
+                "incomplete",
+                "validation report contains no mandatory checks",
+                [],
+            )
+        missing = sorted(
+            _REQUIRED_CHECK_IDS
+            - {check.get("id") for check in checks if isinstance(check, dict)}
+        )
+        if missing:
+            return (
+                "needs_attention",
+                "incomplete",
+                f"validation report omits required checks: {', '.join(missing)}",
+                [],
+            )
+        statuses = [check.get("status") for check in checks if isinstance(check, dict)]
+        if (
+            summary.get("total") != len(checks)
+            or summary.get("passed") != statuses.count("passed")
+            or summary.get("failed") != statuses.count("failed")
+        ):
+            return (
+                "needs_attention",
+                "incomplete",
+                "validation summary contradicts the checks it summarizes",
+                [],
+            )
         for check in checks:
             if not isinstance(check, dict) or any(
                 field not in check
@@ -938,6 +987,29 @@ class DesignSessionService:
                 "validation evidence is empty",
                 collect_failures(report),
             )
+        for path in evidence:
+            if path.suffix.casefold() != ".png" or not path.is_file():
+                continue
+            header = path.read_bytes()[:24]
+            if (
+                len(header) < 24
+                or not header.startswith(_PNG_MAGIC)
+                or header[12:16] != b"IHDR"
+            ):
+                return (
+                    "needs_attention",
+                    "incomplete",
+                    "PNG evidence is not a PNG image",
+                    collect_failures(report),
+                )
+            width, height = struct.unpack(">II", header[16:24])
+            if width < 64 or height < 64:
+                return (
+                    "needs_attention",
+                    "incomplete",
+                    "PNG evidence is too small to be a render",
+                    collect_failures(report),
+                )
         if report.get("status") != "passed":
             return (
                 "needs_attention",

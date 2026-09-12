@@ -17,6 +17,23 @@ from mech_cad_design_agent.secure_fs import (
 )
 
 
+
+def _png_bytes(width: int = 640, height: int = 480) -> bytes:
+    """A minimal but structurally real PNG, so evidence checks see a render."""
+    import struct as _struct, zlib as _zlib
+
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return (
+            _struct.pack(">I", len(data))
+            + body
+            + _struct.pack(">I", _zlib.crc32(body) & 0xFFFFFFFF)
+        )
+
+    header = _struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", header) + _chunk(b"IEND", b"")
+
+
 def _fcstd(*, object_name: str | None = None) -> bytes:
     object_xml = (
         f'<Object type="Part::Feature" name="{object_name}"/>'
@@ -282,8 +299,24 @@ def _write_validation(
         json.dumps(
             {
                 "status": status,
+                "schema_version": 1,
+                "validator": "freecad-model-validation",
                 "working_sha256": working_sha256,
                 "checks": [
+                    {
+                        "id": _check_id,
+                        "validator": "freecad-model-validation",
+                        "status": "passed",
+                        "message": "ok",
+                        "mandatory": True,
+                    }
+                    for _check_id in (
+                        "file.exists",
+                        "document.open",
+                        "document.recompute",
+                        "document.geometry",
+                    )
+                ] + [
                     {
                         "id": "shape-validity",
                         "validator": "freecad-model-validation",
@@ -294,7 +327,8 @@ def _write_validation(
                 ],
                 "fastener_inventory": [],
                 "summary": {
-                    "passed": 1 if status == "passed" else 0,
+                    "total": 5,
+                    "passed": 5 if status == "passed" else 4,
                     "failed": 0 if status == "passed" else 1,
                     "warnings": 0,
                     "fasteners_detected": 0,
@@ -307,7 +341,7 @@ def _write_validation(
     image = root / "validation" / "model_validation.png"
     if include_artifacts:
         markdown.write_text("# Validation\n", encoding="utf-8")
-        image.write_bytes(b"png-evidence")
+        image.write_bytes(_png_bytes())
     return report, [markdown, image]
 
 

@@ -19,6 +19,23 @@ from mech_cad_design_agent.mistake_learning import (
 from mech_cad_design_agent.secure_fs import FileIdentity
 
 
+
+def _png_bytes(width: int = 640, height: int = 480) -> bytes:
+    """A minimal but structurally real PNG, so evidence checks see a render."""
+    import struct as _struct, zlib as _zlib
+
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return (
+            _struct.pack(">I", len(data))
+            + body
+            + _struct.pack(">I", _zlib.crc32(body) & 0xFFFFFFFF)
+        )
+
+    header = _struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", header) + _chunk(b"IEND", b"")
+
+
 def _fcstd(object_name: str | None = None) -> bytes:
     object_xml = (
         f'<Object type="Part::Feature" name="{object_name}"/>' if object_name else ""
@@ -74,12 +91,19 @@ def _attempt(
     model_sha256 = file_sha256(model)
     checks: list[dict[str, object]] = [
         {
-            "id": "shape-validity",
+            "id": check_id,
             "validator": "freecad-model-validation",
             "status": "passed",
-            "message": "valid",
+            "message": "ok",
             "mandatory": True,
         }
+        for check_id in (
+            "file.exists",
+            "document.open",
+            "document.recompute",
+            "document.geometry",
+            "shape-validity",
+        )
     ]
     for check_id, validator, mandatory in failed_checks:
         checks.append(
@@ -97,12 +121,15 @@ def _attempt(
         json.dumps(
             {
                 "status": "passed" if passed else "failed",
+                "schema_version": 1,
+                "validator": "freecad-model-validation",
                 "working_sha256": model_sha256,
                 "checks": checks,
                 "fastener_inventory": [],
                 "summary": {
-                    "passed": 1,
-                    "failed": len(failed_checks),
+                    "total": len(checks),
+                    "passed": sum(1 for item in checks if item["status"] == "passed"),
+                    "failed": sum(1 for item in checks if item["status"] == "failed"),
                     "warnings": 0,
                     "fasteners_detected": 0,
                 },
@@ -113,7 +140,7 @@ def _attempt(
     markdown = root / "validation" / "model_validation.md"
     image = root / "validation" / "model_validation.png"
     markdown.write_text("# report\n", encoding="utf-8")
-    image.write_bytes(b"visual evidence")
+    image.write_bytes(_png_bytes())
     return service.record_result(
         design_id="carrier",
         model_path=str(model),

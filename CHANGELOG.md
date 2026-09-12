@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Validation evidence
+
+- Require a recorded validation report to name a known validator and report schema, to carry at least one mandatory check, to include the `file.exists`, `document.open`, `document.recompute`, and `document.geometry` baseline, and to agree with its own summary counts. A report with an empty `checks` list, or one whose only failures are marked advisory, previously satisfied the completion gate vacuously and recorded a design as `completed`; it is now `incomplete`. The existing model-hash binding is unchanged.
+- Require PNG evidence to be a structurally real image, verifying the signature and the `IHDR` chunk before reading its dimensions, rather than accepting any nonempty file whose name ends in `.png`.
+- Reject Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`) and trailing dots or spaces in `require_safe_id`, matching the portable-name handling `fcstd_security` already applies to archive entries. Ordinary identifiers such as `NULL` and `console` remain valid.
+
+### Gear-drive sizing
+
+- Bound every sizing value `create_gear_pair.py` builds from: module, face width, pressure angle, centre distance, tooth counts within the 12-400 range the tooth-form module already enforces, and bore against the root diameter. A sizing document can reach the builder without having come from the sizing engine, so the builder no longer trusts the file it was handed. An unbounded tooth count previously ran without terminating, and a bore larger than the root diameter produced an empty model that reported itself valid.
+- Reject non-finite custom material values. The guard compared `<= 0`, which admits both `nan` and `inf`.
+
 ## 0.9.0 - 2026-09-11
 
 ### Gear-drive sizing

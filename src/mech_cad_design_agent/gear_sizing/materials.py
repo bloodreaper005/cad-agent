@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import pi, sqrt
+from math import isfinite, pi, sqrt
 from typing import Any, Mapping
 
 from .errors import GearSizingError
@@ -238,10 +238,11 @@ def custom_material(key: str, data: Mapping[str, Any]) -> GearMaterial:
         "elastic_modulus_mpa",
         "brinell",
     ):
-        if float(data[field]) <= 0:
+        value = float(data[field])
+        if not isfinite(value) or value <= 0:
             raise GearSizingError(
                 "input.non_positive",
-                f"custom material {key!r} has a non-positive {field}",
+                f"custom material {key!r} has a non-positive or non-finite {field}",
                 {field: data[field]},
             )
     poisson = float(data["poisson_ratio"])

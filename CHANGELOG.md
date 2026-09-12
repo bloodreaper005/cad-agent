@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Execution trust
+
+- Verify the script before executing it, not only the interpreter. `run_freecad_script` pinned the FreeCAD executable by digest and filesystem identity, re-checking it after every run, and then read and executed whatever file it was handed without checking anything. The reviewed digests of the eight packaged scripts now live in `package_resources.PACKAGED_SCRIPT_DIGESTS`, the runner enforces them, and a packaged script that has been edited on disk is refused before FreeCAD is started rather than executed silently.
+- Require any script that is not in the manifest to pass an explicit `expected_script_sha256`. Running an unreviewed file stays possible and stops being accidental.
+- Read that manifest from the package in the packaging tests instead of holding a second copy, since a test-only duplicate could drift from the one that now gates execution.
+
 ### General mechanical calculation
 
 - Source the gear engine's Marin factors and bearing-family table from `mechanics` instead of holding second copies. `gear_sizing` now imports the endurance limit, surface factor, size factor and reliability table from `mechanics.fatigue`, and derives its bearing coefficients from `mechanics.bearings`. The dependency runs one way only, from `gear_sizing` to `mechanics`.

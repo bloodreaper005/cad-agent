@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import re
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import Sequence
 
+from .package_resources import PACKAGED_SCRIPT_DIGESTS
 from .secure_fs import FileIdentity, SecureFilesystemError, read_managed_file, validate_managed_path
 
 
@@ -99,6 +101,36 @@ def _scrubbed_environment(controlled_directory: Path) -> dict[str, str]:
     return environment
 
 
+class FreeCADScriptTrustError(RuntimeError):
+    """The script handed to FreeCAD is not the reviewed one."""
+
+
+def _pin_script(script: Path, expected_sha256: str | None) -> None:
+    """Verify the code before executing it, not only the interpreter.
+
+    Pinning the executable and then running whatever file the caller names
+    verifies the least interesting half of the pair. A packaged script is
+    checked against the manifest automatically; anything else has to declare
+    its digest, so running an unreviewed file is possible but never accidental.
+    """
+    name = script.name
+    if expected_sha256 is None:
+        expected_sha256 = PACKAGED_SCRIPT_DIGESTS.get(name)
+    if expected_sha256 is None:
+        raise FreeCADScriptTrustError(
+            f"{name} is not a packaged script, so it requires an explicit "
+            "expected_script_sha256"
+        )
+    try:
+        actual = hashlib.sha256(script.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise FreeCADScriptTrustError(f"cannot read {name}: {exc}") from None
+    if actual != expected_sha256.strip().lower():
+        raise FreeCADScriptTrustError(
+            f"{name} does not match its reviewed SHA-256"
+        )
+
+
 def run_freecad_script(
     freecadcmd: Path,
     script: Path,
@@ -108,6 +140,7 @@ def run_freecad_script(
     expected_sha256: str | None = None,
     expected_identity: FileIdentity | None = None,
     controlled_directory: Path | None = None,
+    expected_script_sha256: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Execute a Python file in FreeCAD's console with an explicit argv.
 
@@ -120,6 +153,7 @@ def run_freecad_script(
         raise FreeCADExecutableTrustError(
             "FreeCAD execution requires a reviewed SHA-256 and pinned identity"
         )
+    _pin_script(script, expected_script_sha256)
     controlled = validate_managed_path(
         controlled_directory, allow_missing_leaf=False
     ).path

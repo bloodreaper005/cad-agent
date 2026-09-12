@@ -15,7 +15,10 @@ import unittest
 import zipfile
 
 from mech_cad_design_agent.freecad_discovery import CERTIFIED_FREECADCMD_VERSIONS
-from mech_cad_design_agent.package_resources import freecad_scripts_directory
+from mech_cad_design_agent.package_resources import (
+    PACKAGED_SCRIPT_DIGESTS,
+    freecad_scripts_directory,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -26,16 +29,10 @@ EXPECTED_FREECAD_VERSION = os.environ.get(
 EXPECTED_FREECAD_SHA256 = os.environ.get(
     "MECH_DESIGN_FREECADCMD_SHA256", ""
 ).strip().lower()
-EXPECTED_SCRIPTS = {
-    "create_empty_model.py": "f0bf474d56ff1652786a0e53c168ba83beadc8369af867322d3a4cdaf892a062",
-    "create_gear_pair.py": "db9af785e87f6653c6f4b16561d55d717a28362badbda4f6397ea701fb70d4e6",
-    "extract_model_manifest.py": "cc63c6d6a9281259bb238c5c8d118115f3fb99c03b6a3ea09863bbe0ecfb267d",
-    "normalize_model.py": "295de05c0f86a0fafd69df4911e101e3aaa326be86b999816c8a461f74a39a04",
-    "validate_external_step.py": "f069b4c32b82c3a9016ba95e6dc59ceee4749c0b0501087c2992410d717ec7cd",
-    "validate_fastener_interfaces.py": "1defe089214c6ac9a6b89893c05cfcfe6e2576a7b36ee7e737d98e0ababe099b",
-    "validate_mechanical_interfaces.py": "a92fbc4f759d98ba5ad75ea721c6a9a52884eef56c9a3c36fce81ad771c247bf",
-    "validate_model.py": "e1ac0a683f15cf5c960476a33e7c29358057dd7272c618a6b3a06125baa01f96",
-}
+# Read from the package rather than repeated here. The runtime enforces this
+# manifest now, so a second copy in the tests could drift from the one that
+# actually gates execution.
+EXPECTED_SCRIPTS = dict(PACKAGED_SCRIPT_DIGESTS)
 
 
 class FreeCADPackageResourceTests(unittest.TestCase):

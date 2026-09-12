@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Host-verified model evidence
+
+- Re-validate the model in a process the agent does not control before recording a result as completed. `record_result` now runs the packaged `validate_model.py` under the pinned FreeCAD executable with a host-generated nonce, and accepts the attempt only when that nonce and the model digest come back unchanged. The recorded validation report is written by the same agent that did the modelling, so on its own it can only ever be self-reported; this is the part of the evidence the agent cannot author. The nonce and digest are verified in `record_result` rather than inside the validator, because a check performed by a replaceable component on itself is no check at all.
+- Record the returned evidence under `validation.host_evidence`, and treat a validator that cannot run, answers a different nonce, or describes different bytes as `incomplete` rather than failing the design outright, so the attempt still reaches the correction ledger with its reason.
+- Accept an injected `model_validator` alongside the existing `seed_creator` and `source_normalizer`, so the FreeCAD dependency stays testable.
+- Require a standard-part validation report to carry the digest of the file it certifies and at least one mandatory check. `register_download` compared only `status == "passed"` and never related the report to the part, so any file containing that one key registered any STEP or FCStd file into the catalog under an inherited trust tier.
+
 ### Validation evidence
 
 - Require a recorded validation report to name a known validator and report schema, to carry at least one mandatory check, to include the `file.exists`, `document.open`, `document.recompute`, and `document.geometry` baseline, and to agree with its own summary counts. A report with an empty `checks` list, or one whose only failures are marked advisory, previously satisfied the completion gate vacuously and recorded a design as `completed`; it is now `incomplete`. The existing model-hash binding is unchanged.

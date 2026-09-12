@@ -67,7 +67,24 @@ def test_validated_part_is_registered_with_provenance_and_copied_into_design(
     source = workspace / "bearing.step"
     source.write_bytes(b"ISO-10303-21;BEARING")
     report = workspace / "part-validation.json"
-    report.write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+    report.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "working_sha256": file_sha256(source),
+                "checks": [
+                    {
+                        "id": "step.import",
+                        "validator": "freecad-model-validation",
+                        "status": "passed",
+                        "message": "imported",
+                        "mandatory": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     registry = StandardPartRegistry(
         StandardPartSettings(workspace=workspace, catalog_root=catalog)
     )
@@ -88,3 +105,74 @@ def test_validated_part_is_registered_with_provenance_and_copied_into_design(
     assert Path(str(registered["manifest_path"])).is_file()
     assert Path(str(copied["path"])).read_bytes() == source.read_bytes()
     assert copied["relative_path"].startswith("components/standard-parts/")
+
+
+@pytest.mark.parametrize(
+    "report_body, expected",
+    [
+        ({"status": "passed"}, "does not describe this file"),
+        (
+            {"status": "passed", "working_sha256": "0" * 64, "checks": [{"mandatory": True}]},
+            "does not describe this file",
+        ),
+        ({"status": "passed", "checks": []}, "does not describe this file"),
+    ],
+)
+def test_a_report_that_does_not_describe_the_part_cannot_register_it(
+    tmp_path: Path, report_body: dict, expected: str
+) -> None:
+    """A passed status is not evidence unless it is about this file."""
+    workspace = tmp_path / "workspace"
+    catalog = tmp_path / "catalog"
+    workspace.mkdir()
+    catalog.mkdir()
+    source = workspace / "bearing.step"
+    source.write_bytes(b"ISO-10303-21;BEARING")
+    report = workspace / "part-validation.json"
+    report.write_text(json.dumps(report_body), encoding="utf-8")
+    registry = StandardPartRegistry(
+        StandardPartSettings(workspace=workspace, catalog_root=catalog)
+    )
+
+    with pytest.raises(ValueError, match=expected):
+        registry.register_download(
+            provider_id="step-parts",
+            file_path=str(source),
+            part_number="6204-2RS",
+            standard="ISO 15",
+            nominal_size="20x47x14 mm",
+            source_url="https://step.parts/example",
+            metadata={"manufacturer": "Example", "category": "bearing"},
+            validation_report_path=str(report),
+        )
+
+
+def test_a_report_about_this_part_still_needs_a_mandatory_check(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    catalog = tmp_path / "catalog"
+    workspace.mkdir()
+    catalog.mkdir()
+    source = workspace / "bearing.step"
+    source.write_bytes(b"ISO-10303-21;BEARING")
+    report = workspace / "part-validation.json"
+    report.write_text(
+        json.dumps({"status": "passed", "working_sha256": file_sha256(source)}),
+        encoding="utf-8",
+    )
+    registry = StandardPartRegistry(
+        StandardPartSettings(workspace=workspace, catalog_root=catalog)
+    )
+
+    with pytest.raises(ValueError, match="no mandatory checks"):
+        registry.register_download(
+            provider_id="step-parts",
+            file_path=str(source),
+            part_number="6204-2RS",
+            standard="ISO 15",
+            nominal_size="20x47x14 mm",
+            source_url="https://step.parts/example",
+            metadata={"manufacturer": "Example", "category": "bearing"},
+            validation_report_path=str(report),
+        )

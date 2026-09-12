@@ -9,13 +9,35 @@ import pytest
 
 from mech_cad_design_agent.config import DesignSettings
 from mech_cad_design_agent.hashing import file_sha256
-from mech_cad_design_agent.design_session import DesignSessionService
+from mech_cad_design_agent.design_session import (
+    DesignSessionService,
+    HostValidationError,
+)
 from mech_cad_design_agent.secure_fs import (
     FileIdentity,
     ManagedPath,
     same_managed_path,
 )
 
+
+
+
+def _host_validation(model: Path, nonce: str) -> dict[str, object]:
+    """Stand in for the packaged validator, which needs a real FreeCAD.
+
+    Returns what validate_model.py returns for a healthy model, so the nonce and
+    digest binding record_result performs is exercised rather than bypassed.
+    """
+    return {
+        "schema_version": "MechanicalDesignModelValidation/v1",
+        "status": "valid",
+        "nonce": nonce,
+        "sha256": file_sha256(model),
+        "size_bytes": model.stat().st_size,
+        "document_name": model.stem,
+        "object_count": 1,
+        "recomputed": True,
+    }
 
 
 def _png_bytes(width: int = 640, height: int = 480) -> bytes:
@@ -64,7 +86,9 @@ def _settings(tmp_path: Path) -> DesignSettings:
     )
 
 
-def _service(tmp_path: Path) -> DesignSessionService:
+def _service(
+    tmp_path: Path, *, model_validator: object | None = None
+) -> DesignSessionService:
     def create_seed(destination: Path) -> None:
         destination.write_bytes(_fcstd())
 
@@ -76,6 +100,7 @@ def _service(tmp_path: Path) -> DesignSessionService:
         _settings(tmp_path),
         seed_creator=create_seed,
         source_normalizer=normalize_source,
+        model_validator=model_validator or _host_validation,
     )
 
 
@@ -365,6 +390,86 @@ def test_passed_same_hash_validation_completes_session(tmp_path: Path) -> None:
     state = service.get("basketball-carrier")
     assert state["model"]["sha256"] == file_sha256(model)
     assert state["validation"]["status"] == "passed"
+
+
+def test_host_validation_is_bound_to_the_recorded_model(tmp_path: Path) -> None:
+    """The nonce and digest the host issued must come back unchanged."""
+    seen: list[str] = []
+
+    def validator(model: Path, nonce: str) -> dict[str, object]:
+        seen.append(nonce)
+        return _host_validation(model, nonce)
+
+    service = _service(tmp_path, model_validator=validator)
+    result = _start(service)
+    model = Path(str(result["model_path"]))
+    model.write_bytes(_fcstd(object_name="Carrier"))
+    report, evidence = _write_validation(
+        model.parent, working_sha256=file_sha256(model)
+    )
+
+    recorded = service.record_result(
+        design_id="basketball-carrier",
+        model_path=str(model),
+        validation_report_path=str(report),
+        evidence_paths=[str(path) for path in evidence],
+    )
+
+    assert recorded["status"] == "completed"
+    assert len(seen) == 1 and len(seen[0]) >= 32
+    evidence_recorded = service.get("basketball-carrier")["validation"]["host_evidence"]
+    assert evidence_recorded["nonce"] == seen[0]
+    assert evidence_recorded["sha256"] == file_sha256(model)
+
+
+@pytest.mark.parametrize(
+    "breakage, expected_warning",
+    [
+        ("nonce", "nonce mismatch"),
+        ("digest", "different model bytes"),
+        ("unavailable", "did not confirm the model"),
+    ],
+)
+def test_a_passing_report_still_fails_without_host_evidence(
+    tmp_path: Path, breakage: str, expected_warning: str
+) -> None:
+    """An agent-written report that passes cannot complete on its own.
+
+    Each case is a host validator that declines to corroborate the report: one
+    that answers a different nonce, one that describes different bytes, and one
+    that cannot run at all.
+    """
+
+    def validator(model: Path, nonce: str) -> dict[str, object]:
+        if breakage == "unavailable":
+            raise HostValidationError("FreeCAD is not available")
+        payload = _host_validation(model, nonce)
+        if breakage == "nonce":
+            payload["nonce"] = "0" * 64
+        else:
+            payload["sha256"] = "0" * 64
+        return payload
+
+    service = _service(tmp_path, model_validator=validator)
+    result = _start(service)
+    model = Path(str(result["model_path"]))
+    model.write_bytes(_fcstd(object_name="Carrier"))
+    report, evidence = _write_validation(
+        model.parent, working_sha256=file_sha256(model)
+    )
+
+    recorded = service.record_result(
+        design_id="basketball-carrier",
+        model_path=str(model),
+        validation_report_path=str(report),
+        evidence_paths=[str(path) for path in evidence],
+    )
+
+    assert recorded["status"] == "needs_attention"
+    state = service.get("basketball-carrier")
+    assert state["validation"]["status"] == "incomplete"
+    assert expected_warning in state["validation"]["warning"]
+    assert state["validation"]["host_evidence"] is None
 
 
 @pytest.mark.parametrize("failure", ["failed", "stale", "missing-evidence"])

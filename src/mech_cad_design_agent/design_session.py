@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from io import BytesIO
 import json
+import secrets
 import struct
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -48,6 +49,7 @@ _KNOWLEDGE_STATUSES = frozenset(
 
 SeedCreator = Callable[[Path], None]
 SourceNormalizer = Callable[[Path, Path], None]
+ModelValidator = Callable[[Path, str], dict[str, Any]]
 
 
 def _timestamp() -> str:
@@ -158,6 +160,11 @@ _REQUIRED_CHECK_IDS = frozenset(
     {"file.exists", "document.open", "document.recompute", "document.geometry"}
 )
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_HOST_VALIDATION_PREFIX = "MECHANICAL_DESIGN_FCSTD_VALIDATION_V1 "
+
+
+class HostValidationError(RuntimeError):
+    """The host could not obtain nonce-bound evidence about the model."""
 
 
 class DesignSessionService:
@@ -169,12 +176,14 @@ class DesignSessionService:
         *,
         seed_creator: SeedCreator | None = None,
         source_normalizer: SourceNormalizer | None = None,
+        model_validator: ModelValidator | None = None,
     ) -> None:
         self.settings = settings
         self.seed_creator = seed_creator or self._create_seed_with_freecad
         self.source_normalizer = (
             source_normalizer or self._normalize_source_with_freecad
         )
+        self.model_validator = model_validator or self._validate_model_with_freecad
 
     def _create_seed_with_freecad(self, destination: Path) -> None:
         with freecad_scripts_directory() as scripts:
@@ -190,6 +199,52 @@ class DesignSessionService:
         if completed.returncode != 0 or not destination.is_file():
             diagnostic = (completed.stderr + "\n" + completed.stdout)[-4000:]
             raise RuntimeError(f"FreeCAD could not create the design seed: {diagnostic}")
+
+    def _validate_model_with_freecad(self, model: Path, nonce: str) -> dict[str, Any]:
+        """Re-validate the model in a process the agent does not control.
+
+        The recorded validation report is written by the same agent that did the
+        modelling, so it can only ever be self-reported. This runs the packaged
+        validator under the pinned executable and binds the result to a nonce the
+        host generated, which the agent never sees and cannot write into the
+        subprocess stdout it is read from.
+        """
+        with freecad_scripts_directory() as scripts:
+            completed = run_freecad_script(
+                self.settings.freecadcmd,
+                scripts / "validate_model.py",
+                [model, nonce],
+                timeout_seconds=900,
+                expected_sha256=self.settings.freecadcmd_sha256,
+                expected_identity=self.settings.freecadcmd_identity,
+                controlled_directory=model.parent,
+            )
+        if completed.returncode != 0:
+            diagnostic = (completed.stderr + "\n" + completed.stdout)[-4000:]
+            raise HostValidationError(
+                f"FreeCAD could not validate the model: {diagnostic}"
+            )
+        line = next(
+            (
+                item
+                for item in completed.stdout.splitlines()
+                if item.startswith(_HOST_VALIDATION_PREFIX)
+            ),
+            None,
+        )
+        if line is None:
+            raise HostValidationError(
+                "host validation produced no nonce-bound evidence"
+            )
+        try:
+            payload = json.loads(line[len(_HOST_VALIDATION_PREFIX) :])
+        except json.JSONDecodeError as exc:
+            raise HostValidationError(
+                f"host validation evidence is not valid JSON: {exc}"
+            ) from None
+        if not isinstance(payload, dict) or payload.get("nonce") != nonce:
+            raise HostValidationError("host validation nonce mismatch")
+        return payload
 
     def _normalize_source_with_freecad(
         self, source: Path, destination: Path
@@ -846,6 +901,33 @@ class DesignSessionService:
                 evidence=evidence,
                 model_sha256=model_read.sha256,
             )
+            host_evidence: dict[str, Any] | None = None
+            if result_status == "completed":
+                # Only worth the FreeCAD run once the agent's own report claims a
+                # pass. A report that already fails needs no second opinion.
+                nonce = secrets.token_hex(32)
+                try:
+                    host_evidence = self.model_validator(model, nonce)
+                except HostValidationError as exc:
+                    result_status, validation_status = "needs_attention", "incomplete"
+                    warning = f"host validation did not confirm the model: {exc}"
+                    host_evidence = None
+                else:
+                    # Verified here rather than inside the validator, because the
+                    # validator is replaceable and a check the replaced component
+                    # performs on itself is no check at all.
+                    if not isinstance(host_evidence, dict) or host_evidence.get(
+                        "nonce"
+                    ) != nonce:
+                        result_status = "needs_attention"
+                        validation_status = "incomplete"
+                        warning = "host validation nonce mismatch"
+                        host_evidence = None
+                    elif host_evidence.get("sha256") != model_read.sha256:
+                        result_status = "needs_attention"
+                        validation_status = "incomplete"
+                        warning = "host validation describes different model bytes"
+                        host_evidence = None
             ledger = self._ledger_of(state)
             recorded_at = _timestamp()
             ledger.append(
@@ -870,6 +952,7 @@ class DesignSessionService:
                     path.relative_to(root).as_posix() for path in evidence
                 ],
                 "warning": warning,
+                "host_evidence": host_evidence,
             }
             state["final_confirmation"] = {
                 "state": "not_confirmed",

@@ -15,6 +15,25 @@ from mech_cad_design_agent.secure_fs import FileIdentity
 
 
 
+
+def _host_validation(model: Path, nonce: str) -> dict[str, object]:
+    """Stand in for the packaged validator, which needs a real FreeCAD.
+
+    Returns what validate_model.py returns for a healthy model, so the nonce and
+    digest binding record_result performs is exercised rather than bypassed.
+    """
+    return {
+        "schema_version": "MechanicalDesignModelValidation/v1",
+        "status": "valid",
+        "nonce": nonce,
+        "sha256": file_sha256(model),
+        "size_bytes": model.stat().st_size,
+        "document_name": model.stem,
+        "object_count": 1,
+        "recomputed": True,
+    }
+
+
 def _png_bytes(width: int = 640, height: int = 480) -> bytes:
     """A minimal but structurally real PNG, so evidence checks see a render."""
     import struct as _struct, zlib as _zlib
@@ -62,7 +81,9 @@ def _service(tmp_path: Path) -> DesignSessionService:
     def seed(destination: Path) -> None:
         destination.write_bytes(_fcstd())
 
-    service = DesignSessionService(settings, seed_creator=seed)
+    service = DesignSessionService(
+        settings, seed_creator=seed, model_validator=_host_validation
+    )
     service.start(
         design_id="carrier",
         title="Basketball Carrier",

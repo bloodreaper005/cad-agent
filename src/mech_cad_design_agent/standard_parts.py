@@ -78,9 +78,21 @@ class StandardPartRegistry:
         if not report_path.is_relative_to(self.settings.workspace.resolve()):
             raise ValueError("validation report must be inside the workspace")
         report = json.loads(report_path.read_text(encoding="utf-8"))
+        digest = file_sha256(source)
+        # The report is an ordinary file in the workspace, so it has to prove it
+        # describes this part rather than merely sitting next to it. Without
+        # this, any file containing {"status": "passed"} registers any CAD file.
+        if digest not in {report.get("working_sha256"), report.get("sha256")}:
+            raise ValueError("validation report does not describe this file")
+        if not any(
+            isinstance(check, dict) and check.get("mandatory") is True
+            for check in (
+                report.get("checks") if isinstance(report.get("checks"), list) else []
+            )
+        ):
+            raise ValueError("standard part validation ran no mandatory checks")
         if report.get("status") != "passed":
             raise ValueError("standard part requires passed validation")
-        digest = file_sha256(source)
         manufacturer = self._slug(str(metadata.get("manufacturer") or provider["name"]))
         category = self._slug(str(metadata.get("category") or "uncategorized"))
         target_dir = ensure_managed_directory(

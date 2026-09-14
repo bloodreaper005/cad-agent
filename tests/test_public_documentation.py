@@ -21,7 +21,7 @@ def normalized(path: Path) -> str:
 
 def test_public_identity_and_design_process() -> None:
     text = normalized(README)
-    assert text.startswith("# Mech CAD Design Agent")
+    assert text.startswith("# CAD Agent")
     assert "coding agents" in text
     assert "does not embed a language model" in text
     assert "does not replace engineering review" in text

@@ -1,11 +1,15 @@
-# Mech CAD Design Agent
+# CAD Agent
 
 ![AI-generated mechanical CAD product showcase](docs/assets/mech-cad-design-showcase.gif)
 
-Mech CAD Design Agent helps coding agents turn mechanical
+CAD Agent helps coding agents turn mechanical
 requirements into validated FreeCAD models. It combines requirement reasoning,
 knowledge reuse, standard-part provenance, deterministic CAD state, automatic
 validation, correction, final confirmation, and reusable Design Lessons.
+
+Nothing here guesses a number. Sizing follows published standards, the result
+carries its own assumptions and limitations, and a finished model is confirmed
+by a process the agent cannot reach or forge.
 
 The package provides the `mech-cad-design` CLI and
 `mech-cad-design-mcp` server. A compatible coding agent performs the design
@@ -45,10 +49,21 @@ User request
   body, industry association, and attributable authorized-distributor sources.
 - Register selected CAD components with provider, manufacturer, part identity,
   source, license, validation evidence, and SHA-256 provenance.
+- Calculate from Shigley's Mechanical Engineering Design independently of any
+  one component: stress states and principal stresses, static and fatigue
+  failure criteria, deflection and columns, shafts, bolted joints, springs,
+  rolling and journal bearings, gears, welds, clutches, brakes and belts. Pure
+  standard library, with every shipped constant checked against an independent
+  anchor and every curve fit marked as one.
 - Validate geometry, dimensions, placements, interfaces, assemblies,
   fasteners, BOM consistency, and visual evidence.
 - Bind completion to the exact FCStd SHA-256 and passed JSON, Markdown, and PNG
   evidence.
+- Re-verify the finished model in a separate process the agent does not
+  control, under a SHA-256-pinned FreeCAD executable running digest-pinned
+  scripts, and accept the result only when a host-issued nonce and the recorded
+  model digest both come back unchanged. The agent writes its own validation
+  report; this is the part of the evidence it cannot author.
 - Record every validation attempt in an append-only correction ledger, so a
   failure that was fixed is not lost when the next attempt is recorded.
 - Evaluate reusable lessons automatically after the user confirms the final
@@ -83,7 +98,7 @@ Neo4j projection rebuilds.
 
 ## Architecture
 
-![Mech CAD Design Agent architecture](docs/assets/mech-cad-design-agent-architecture-v2.png)
+![CAD Agent architecture](docs/assets/mech-cad-design-agent-architecture-v2.png)
 
 Design sessions live under `designs/<design-id>/` as atomic JSON state, one
 authoritative `model.FCStd`, optional source snapshots, validation evidence,
@@ -117,10 +132,14 @@ published, correction lessons are ordinary Design Lessons, so
 
 ## Install and run
 
-Python 3.12 or newer is required.
+Python 3.12 or newer is required. There is no PyPI release yet, so install from
+a clone:
 
 ```bash
-python -m pip install mech-cad-design-agent
+git clone https://github.com/bloodreaper005/cad-agent
+cd cad-agent
+python -m pip install .
+
 mech-cad-design init \
   --workspace /path/to/mech-cad-design-workspace \
   --actor engineer \
@@ -197,7 +216,7 @@ The current acceptance target is official FreeCAD 1.1.3. Configure the exact
 `FreeCADCmd` path and SHA-256 in the workspace or environment. Durable
 knowledge works out of the box on the local SQLite store; set
 `MECH_DESIGN_DATABASE_URL` to use PostgreSQL instead, which has no pgvector
-requirement. Install `mech-cad-design-agent[neo4j]` only when the
+requirement. Install the `neo4j` extra (`python -m pip install '.[neo4j]'`) only when the
 optional relationship projection is wanted.
 
 ## Project-owned Agent Skills
@@ -224,6 +243,7 @@ optional relationship projection is wanted.
 - [Engineer learning playbook](docs/ENGINEER_LEARNING_PLAYBOOK.md)
 - [Database deployment](docs/DATABASE_DEPLOYMENT.md)
 - [Windows release acceptance](docs/WINDOWS_RELEASE_ACCEPTANCE.md)
+- [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
 
 ## License

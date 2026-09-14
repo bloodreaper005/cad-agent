@@ -16,3 +16,8 @@ data/
 *.step
 *.stp
 *.brp
+
+# Internal planning and spec documents. public-repository.toml already
+# classifies this as private; ignoring it keeps a locally recreated copy
+# from being committed back into a now-public repository.
+docs/superpowers/

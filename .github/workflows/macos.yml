@@ -26,6 +26,26 @@ jobs:
       - name: Resolve the frozen test environment
         shell: bash
         run: uv sync --frozen --group test --python 3.12
+      - name: Prewarm the pinned build and runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Several tests build a wheel and a source distribution to check the
+          # packaging contract. Those builds resolve hatchling from
+          # build-system.requires, and the suite below runs with the network
+          # disabled, so the cache has to be populated while it is still
+          # available. Without this the offline run fails on hatchling rather
+          # than on anything it was meant to test.
+          dist="$RUNNER_TEMP/public-build-prewarm"
+          venv="$RUNNER_TEMP/public-install-prewarm"
+          constraints="$RUNNER_TEMP/public-test-constraints.txt"
+          uv build --wheel --sdist --out-dir "$dist"
+          uv export --frozen --group test --format requirements-txt \
+            --no-emit-project --no-hashes --output-file "$constraints"
+          uv venv --python 3.12 "$venv"
+          wheel="$(find "$dist" -name '*.whl' -maxdepth 1 | head -1)"
+          uv pip install --python "$venv/bin/python" --constraint "$constraints" \
+            "$wheel" pytest==9.1.1 jsonschema==4.26.0
       - name: Run the complete non-interactive suite offline
         shell: bash
         run: |

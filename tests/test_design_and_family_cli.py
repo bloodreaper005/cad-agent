@@ -145,7 +145,13 @@ def test_design_open_reports_the_next_action(
     assert result["resumed"] is True
     assert result["next_action"] == "retrieve_knowledge"
     assert result["design_id"] == "carrier"
-    assert result["model_path"].endswith("designs/carrier/model.FCStd")
+    # Separator-agnostic: the same assertion fails on Windows against a string
+    # ending in backslashes.
+    assert Path(result["model_path"]).parts[-3:] == (
+        "designs",
+        "carrier",
+        "model.FCStd",
+    )
 
 
 def test_design_open_names_the_known_jobs_when_one_is_missing(

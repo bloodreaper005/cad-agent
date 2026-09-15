@@ -112,7 +112,14 @@ def test_runtime_defaults_to_a_workspace_local_sqlite_store(tmp_path: Path) -> N
     settings = runtime.knowledge_settings()
 
     assert settings.effective_backend == SQLITE_BACKEND
-    assert settings.effective_sqlite_path == workspace / "data" / "knowledge.sqlite3"
+    # Compared against the workspace the runtime resolved, not the one handed in.
+    # On Windows the runtime canonicalises to the extended-length \\?\C:\... form
+    # for long-path support, so a hand-built path names the same file and is not
+    # an equal Path.
+    assert (
+        settings.effective_sqlite_path
+        == settings.workspace / "data" / "knowledge.sqlite3"
+    )
 
 
 def test_runtime_honors_an_explicit_sqlite_path(tmp_path: Path) -> None:
@@ -122,9 +129,10 @@ def test_runtime_honors_an_explicit_sqlite_path(tmp_path: Path) -> None:
         environ={"MECH_DESIGN_SQLITE_PATH": "data/custom.sqlite3"},
     )
 
+    settings = runtime.knowledge_settings()
     assert (
-        runtime.knowledge_settings().effective_sqlite_path
-        == workspace / "data" / "custom.sqlite3"
+        settings.effective_sqlite_path
+        == settings.workspace / "data" / "custom.sqlite3"
     )
 
 

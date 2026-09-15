@@ -47,6 +47,19 @@ NEO4J_IMAGE = (
 )
 
 
+
+# These exercise windows_database_deployment_acceptance.ps1, which calls
+# Windows-only cmdlets such as Get-Volume. Gating on pwsh alone was enough
+# while the suite only ever ran on Windows or on machines without PowerShell;
+# a GitHub macOS runner ships pwsh, so the tests began running there and
+# failing on cmdlets that do not exist. Running a Windows acceptance script on
+# macOS proves nothing even when it happens to pass.
+_WINDOWS_POWERSHELL = pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="Windows with PowerShell 7 required",
+)
+
+
 def test_postgres_bootstrap_does_not_require_optional_neo4j_configuration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -382,7 +395,7 @@ def test_clean_deployment_environment_preserves_explicit_docker_config(
     assert environment["DOCKER_CONFIG"] == "/synthetic/docker-config"
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 required")
+@_WINDOWS_POWERSHELL
 def test_windows_d3_runner_contract_keeps_second_volume_for_filesystem_gates() -> None:
     probe = subprocess.run(
         [
@@ -407,7 +420,7 @@ def test_windows_d3_runner_contract_keeps_second_volume_for_filesystem_gates() -
     assert contract["second_ntfs_gates"] == ["Gate00", "Gate02", "Gate03"]
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 required")
+@_WINDOWS_POWERSHELL
 def test_windows_d3_runner_separates_primary_temp_from_second_ntfs_root(
     tmp_path: Path,
 ) -> None:
@@ -456,7 +469,7 @@ def test_windows_d3_runner_separates_primary_temp_from_second_ntfs_root(
         shutil.rmtree(second, ignore_errors=False)
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 required")
+@_WINDOWS_POWERSHELL
 def test_windows_d3_runner_rejects_same_volume_layout(tmp_path: Path) -> None:
     primary = tmp_path / "primary temp parent"
     second = tmp_path / "invalid second root"
@@ -490,7 +503,7 @@ def test_windows_d3_runner_rejects_same_volume_layout(tmp_path: Path) -> None:
     assert list(primary.iterdir()) == []
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 required")
+@_WINDOWS_POWERSHELL
 def test_windows_d3_runner_cleanup_removes_only_owned_unicode_failure_tree(
     tmp_path: Path,
 ) -> None:
@@ -542,7 +555,7 @@ def test_windows_d3_runner_cleanup_removes_only_owned_unicode_failure_tree(
     assert sentinel.read_text(encoding="utf-8") == "keep"
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 required")
+@_WINDOWS_POWERSHELL
 def test_windows_d3_runner_cleanup_unlinks_reparse_without_following_it(
     tmp_path: Path,
 ) -> None:

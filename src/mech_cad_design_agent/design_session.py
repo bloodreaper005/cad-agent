@@ -36,6 +36,9 @@ from .secure_fs import (
     validate_external_read_path,
     validate_managed_path,
 )
+from .surrogate_crosscheck import crosscheck_screening
+from .surrogate_domain import evaluate_domain
+from .surrogate_screening import parse_surrogate_screening
 
 
 _SESSION_SCHEMA = "DesignSession/v1"
@@ -46,6 +49,17 @@ _MODEL_CLASSIFICATIONS = frozenset({"new_design", "existing_model"})
 _KNOWLEDGE_STATUSES = frozenset(
     {"not_executed", "completed_matches", "completed_no_match", "unavailable"}
 )
+_SCREENING_STATUSES = frozenset(
+    {"not_executed", "recorded", "refused", "invalidated"}
+)
+_EMPTY_SCREENING: dict[str, Any] = {
+    "status": "not_executed",
+    "model_sha256": None,
+    "document": None,
+    "domain": None,
+    "crosscheck": None,
+    "warning": None,
+}
 
 SeedCreator = Callable[[Path], None]
 SourceNormalizer = Callable[[Path, Path], None]
@@ -151,6 +165,17 @@ def _validate_state(raw: object) -> dict[str, Any]:
         state["correction_ledger"] = []
     elif not isinstance(ledger, list):
         raise ValueError("design.json correction_ledger is invalid")
+    screening = state.get("screening")
+    if screening is None:
+        # A session written before this release has no screening block. It
+        # loads normally and reports an empty one, exactly as the correction
+        # ledger above does for sessions older than 0.8.0.
+        state["screening"] = dict(_EMPTY_SCREENING)
+    elif (
+        not isinstance(screening, dict)
+        or screening.get("status") not in _SCREENING_STATUSES
+    ):
+        raise ValueError("design.json screening state is invalid")
     return state
 
 
@@ -413,6 +438,7 @@ class DesignSessionService:
                         "evidence_relative_paths": [],
                     },
                     "correction_ledger": [],
+                    "screening": dict(_EMPTY_SCREENING),
                     "final_confirmation": {
                         "state": "not_confirmed",
                         "text": None,
@@ -515,9 +541,24 @@ class DesignSessionService:
             state = self._read_state(root)
             model_path = root / "model.FCStd"
             recorded_sha = state["model"].get("sha256")
-            if state["model_status"] == "completed" and (
-                not model_path.is_file() or file_sha256(model_path) != recorded_sha
+            current_sha = file_sha256(model_path) if model_path.is_file() else None
+            changed = False
+
+            screening = state["screening"]
+            if screening["status"] in {"recorded", "refused"} and (
+                screening.get("model_sha256") != current_sha
             ):
+                # Screening is bound to the bytes it was taken against, the same
+                # way validation evidence is. A later edit does not make the old
+                # estimate wrong, it makes it about a different model.
+                state["screening"] = {
+                    **screening,
+                    "status": "invalidated",
+                    "warning": "model changed after the recorded screening",
+                }
+                changed = True
+
+            if state["model_status"] == "completed" and current_sha != recorded_sha:
                 state["model_status"] = "needs_attention"
                 state["validation"]["status"] = "stale"
                 state["validation"]["warning"] = (
@@ -535,6 +576,9 @@ class DesignSessionService:
                     "review_sha256": None,
                     "warning": "model changed after final result recording",
                 }
+                changed = True
+
+            if changed:
                 state["updated_at"] = _timestamp()
                 self._replace_state(root, state)
             return state
@@ -647,6 +691,82 @@ class DesignSessionService:
             state["updated_at"] = _timestamp()
             self._replace_state(root, state)
             return state
+
+    def record_screening(
+        self,
+        *,
+        design_id: str,
+        document: Mapping[str, Any],
+        query: Mapping[str, Any] | None = None,
+        load_case: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Store one calibrated screening estimate against this design.
+
+        This method deliberately touches nothing else. It does not set
+        `model_status`, does not write `validation`, and cannot reach
+        `final_confirmation`. A screening estimate is triage that runs in
+        milliseconds so the expensive check is aimed at the right candidate; it
+        is not evidence, and a design that screens badly is not thereby blocked
+        any more than one that screens well is thereby complete.
+
+        An estimate whose declared envelope does not contain the query is
+        refused rather than stored as usable. The refusal itself is kept, with
+        the bounds it violated, because "the surrogate declined" is a fact a
+        later reader needs just as much as a number would have been.
+        """
+        screening = parse_surrogate_screening(document)
+        decision = evaluate_domain(screening.domain, query or {})
+
+        crosscheck = None
+        if decision.in_domain and load_case is not None:
+            crosscheck = crosscheck_screening(screening, load_case).as_dict()
+
+        root = self._root_for(design_id, must_exist=True)
+        with exclusive_file_lock(root / ".design.lock"):
+            state = self._read_state(root)
+            model_path = root / "model.FCStd"
+            if decision.in_domain:
+                recorded = {
+                    "status": "recorded",
+                    "document": screening.as_dict(),
+                    "warning": None,
+                }
+            else:
+                violated = ", ".join(
+                    str(item["key"]) for item in decision.violations
+                )
+                recorded = {
+                    "status": "refused",
+                    "document": None,
+                    "warning": f"query is outside the fitted domain: {violated}",
+                }
+            state["screening"] = {
+                **recorded,
+                "model_sha256": (
+                    file_sha256(model_path) if model_path.is_file() else None
+                ),
+                "domain": decision.as_dict(),
+                "crosscheck": crosscheck,
+            }
+            state["updated_at"] = _timestamp()
+            self._replace_state(root, state)
+            return state["screening"]
+
+    def screening_status(self, design_id: str) -> dict[str, Any]:
+        """Report this design's screening estimate without altering it."""
+        state = self.get(design_id)
+        screening = state["screening"]
+        return {
+            "schema_version": "DesignScreeningStatus/v1",
+            "design_id": state["design_id"],
+            "status": screening["status"],
+            "model_sha256": screening.get("model_sha256"),
+            "domain": screening.get("domain"),
+            "crosscheck": screening.get("crosscheck"),
+            "document": screening.get("document"),
+            "warning": screening.get("warning"),
+            "gates_completion": False,
+        }
 
     def confirm(self, *, design_id: str, confirmation_text: str) -> dict[str, object]:
         """Record final-model confirmation after exact-hash validation."""
@@ -847,6 +967,27 @@ class DesignSessionService:
             raise ValueError("final confirmation evidence is incomplete")
         return model_read.sha256
 
+    def _screening_images(self, root: Path, state: Mapping[str, Any]) -> set[Path]:
+        """Resolve the render paths a recorded screening estimate claims."""
+        document = (state.get("screening") or {}).get("document")
+        if not isinstance(document, Mapping):
+            return set()
+        images: set[Path] = set()
+        for field in document.get("fields") or ():
+            if not isinstance(field, Mapping):
+                continue
+            relative = field.get("image_relative_path")
+            if isinstance(relative, str) and relative:
+                images.add(
+                    self._inside(
+                        root,
+                        relative,
+                        "screening image",
+                        allow_missing_leaf=True,
+                    )
+                )
+        return images
+
     def _inside(
         self,
         root: Path,
@@ -894,6 +1035,16 @@ class DesignSessionService:
                 )
                 for value in evidence_paths
             ]
+            screening_images = self._screening_images(root, state)
+            for path in evidence:
+                if path in screening_images:
+                    # A surrogate render is a picture of a prediction. It is a
+                    # real PNG inside the session, so every structural check on
+                    # evidence would pass it; only its origin disqualifies it.
+                    raise ValueError(
+                        "a surrogate screening image cannot serve as validation "
+                        f"evidence: {path.relative_to(root).as_posix()}"
+                    )
             model_read = read_managed_file(model)
             inspect_fcstd_bytes(model_read.content)
             result_status, validation_status, warning, failures = self._check_validation(

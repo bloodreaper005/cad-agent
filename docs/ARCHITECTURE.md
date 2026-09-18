@@ -114,6 +114,25 @@ defects still outstanding while the newest attempt fails. Corrections are
 reported only while the newest attempt passes, so a currently failing design
 never claims a fix.
 
+## Surrogate screening
+
+`design.json` carries a `screening` block holding at most one
+`SurrogateScreening/v1` estimate, produced by a separate process and handed in.
+The block records the model SHA-256 it was taken against, the domain decision
+that admitted or refused it, and an optional closed-form crosscheck.
+
+The estimate is deliberately outside the evidence path. It never sets
+`model_status`, never writes `validation`, and cannot reach
+`final_confirmation`; a screening image is never accepted as validation
+evidence. A model byte change invalidates a recorded screening exactly as it
+invalidates validation evidence.
+
+A prediction must be an interval with a calibration record, and a query outside
+the declared training envelope is refused with the bounds it violated rather
+than answered. Where a load case reduces to a case `mechanics` computes
+exactly, the interval is tested against that value and the analytical answer is
+never adjusted to agree. See [Surrogate screening](SURROGATE_SCREENING.md).
+
 ## Design Lessons
 
 Final-model confirmation immediately evaluates structured candidates derived

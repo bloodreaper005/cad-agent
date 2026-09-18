@@ -195,3 +195,53 @@ def test_knowledge_admin_has_no_generic_durable_review_tool() -> None:
     server = create_mcp(knowledge_service=object(), tool_profile="knowledge-admin")
 
     assert "knowledge_review" not in server._tool_manager._tools
+
+
+def test_screening_tools_reach_the_design_service_without_freecad() -> None:
+    """Screening reads and writes design.json only, so it takes the reader path."""
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Design:
+        def record_screening(self, **kwargs: object) -> dict[str, object]:
+            calls.append(("record_screening", kwargs))
+            return {"status": "recorded", "warning": None}
+
+        def screening_status(self, design_id: str) -> dict[str, object]:
+            calls.append(("screening_status", {"design_id": design_id}))
+            return {
+                "schema_version": "DesignScreeningStatus/v1",
+                "status": "recorded",
+                "gates_completion": False,
+            }
+
+    server = create_mcp(design_service=Design(), tool_profile="design")
+
+    recorded = json.loads(
+        _tool(server, "design_screening_record")(
+            "carrier",
+            '{"schema_version":"SurrogateScreening/v1"}',
+            '{"material_class":"linear_elastic"}',
+            '{"kind":"axial"}',
+        )
+    )
+    status = json.loads(_tool(server, "design_screening_status")("carrier"))
+
+    assert recorded["status"] == "recorded"
+    assert status["gates_completion"] is False
+    assert [name for name, _ in calls] == ["record_screening", "screening_status"]
+    assert calls[0][1]["query"] == {"material_class": "linear_elastic"}
+    assert calls[0][1]["load_case"] == {"kind": "axial"}
+
+
+def test_an_omitted_load_case_reaches_the_service_as_none() -> None:
+    calls: list[dict[str, object]] = []
+
+    class Design:
+        def record_screening(self, **kwargs: object) -> dict[str, object]:
+            calls.append(kwargs)
+            return {"status": "recorded"}
+
+    server = create_mcp(design_service=Design(), tool_profile="design")
+    _tool(server, "design_screening_record")("carrier", "{}")
+
+    assert calls[0]["load_case"] is None

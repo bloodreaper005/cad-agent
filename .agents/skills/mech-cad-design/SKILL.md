@@ -35,3 +35,13 @@ model.
 Treat existing source CAD as read-only. Preserve its snapshot and edit only the
 session `model.FCStd`. Use `freecad-standard-parts` for catalog components and
 `freecad-model-validation` after every visible model change.
+
+When a surrogate is configured, `design_screening_record` is an optional aid
+before substantive modeling and never a substitute for step 4. Report the
+interval and its coverage, never a single number taken from the middle of it.
+An out-of-domain refusal is a result: say the surrogate declined and continue
+the ordinary process rather than restating the query to get past the gate. Pass
+the load case when it reduces to one `mechanics` covers, and if the closed-form
+anchor falls outside the interval, keep the closed-form value and say the
+estimate was miscalibrated. Screening never changes `model_status`, never
+satisfies a validation check, and never justifies confirmation.

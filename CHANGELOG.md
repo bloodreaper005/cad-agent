@@ -1,5 +1,63 @@
 # Changelog
 
+## Unreleased
+
+### Surrogate screening
+
+- Accept a learned screening estimate as a first-class record that cannot be
+  mistaken for evidence. Heavy analysis is slow and licensed, so the useful
+  thing a surrogate does is aim the expensive check at the right candidate; the
+  dangerous thing it does is produce a number that looks like a result. The new
+  `screening` block in `design.json` holds at most one `SurrogateScreening/v1`
+  document, bound to the model SHA-256 it was taken against, and it never sets
+  `model_status`, never writes `validation`, and cannot reach
+  `final_confirmation`. A design that screens badly still completes on passed
+  validation, and one that screens well still requires it.
+- Refuse a point estimate at the parse. `lower` and `upper` are both required on
+  every prediction, so a document carrying a single value is rejected rather
+  than widened into an interval nobody calibrated. An interval with no
+  `calibration` record naming its method, set size and set digest is refused for
+  the same reason: the coverage figure has to be attributable, or the package is
+  guessing a number after all.
+- Refuse a query outside the declared training envelope, naming every bound it
+  violated rather than the first. This is the rule the springs module already
+  follows when it declines a wire strength outside its fitted range, applied to
+  the failure a surrogate actually has, which is confident nonsense on geometry
+  unlike anything it was fitted over. A missing key in the query is a refusal,
+  not a pass, because a quantity nobody measured has not been shown to be inside
+  anything. The refusal is stored with its violated bounds, since "the surrogate
+  declined" is a fact a later reader needs as much as a number would have been.
+- Test the interval against the closed-form `mechanics` result where the load
+  case reduces to one, through the elementary Shigley chapter 3 cases. An
+  interval that excludes the analytical answer means the surrogate is
+  miscalibrated on that case, and the analytical value is never adjusted to
+  agree with it. `not_applicable` is the default rather than a forced
+  comparison, because an anchor that had to be guessed at would not be an
+  anchor.
+- Require a full-field entry to carry per-node intervals alongside its values,
+  so a rendered contour plot with no uncertainty behind it cannot be stored. A
+  crisp stress plot is the most persuasive image in engineering and carries the
+  authority of a solved result whether or not it earned it; the schema makes the
+  bands travel with the picture.
+- Reject non-finite and inverted bounds, an empty prediction list, duplicate
+  quantities, an empty domain envelope, a coverage outside (0, 1), and any
+  `attestation` other than `screening_estimate`. An empty predictions list would
+  otherwise satisfy every downstream reader vacuously, which is the failure
+  0.10.0 closed for validation reports.
+- Add `design_screening_record` and `design_screening_status` to the design MCP
+  surface and `mech-cad-design screening record` and `screening status` to the
+  CLI. Both take the reader path, because screening reads and writes
+  `design.json` and needs no FreeCAD.
+- State the widened boundary in `README.md`, `AGENTS.md` and
+  `docs/ARCHITECTURE.md` in the same change, and add
+  `docs/SURROGATE_SCREENING.md`. "Nothing here guesses a number" stays on the
+  first page because the new surface is described exactly: a calibrated interval
+  with declared coverage, refused outside its fitted domain, that gates nothing.
+- The model itself stays outside the package. `pyproject.toml` gains no
+  dependency and `tests/test_boundaries.py` still enforces that none arrives;
+  the surrogate runs in a separate process under a documented boundary the way
+  the external FreeCAD GUI MCP already does.
+
 ## 0.11.0 - 2026-09-12
 
 ### Execution trust

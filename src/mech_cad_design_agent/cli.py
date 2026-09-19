@@ -147,6 +147,30 @@ def _parser() -> argparse.ArgumentParser:
     design_mistakes.add_argument("--workspace", type=Path)
     design_mistakes.add_argument("--design-id", required=True)
 
+    screening = commands.add_parser(
+        "screening", help="record surrogate screening estimates (never a gate)"
+    )
+    screening_commands = screening.add_subparsers(
+        dest="screening_command", required=True
+    )
+
+    screening_record = screening_commands.add_parser(
+        "record", help="record a calibrated screening estimate against a design"
+    )
+    screening_record.add_argument("--workspace", type=Path)
+    screening_record.add_argument("--design-id", required=True)
+    screening_record.add_argument("--screening-json", default=None)
+    screening_record.add_argument("--screening-file", type=Path, default=None)
+    screening_record.add_argument("--query-json", default=None)
+    screening_record.add_argument("--query-file", type=Path, default=None)
+    screening_record.add_argument("--load-case-json", default=None)
+
+    screening_status = screening_commands.add_parser(
+        "status", help="report a design's screening estimate"
+    )
+    screening_status.add_argument("--workspace", type=Path)
+    screening_status.add_argument("--design-id", required=True)
+
     gear = commands.add_parser("gear", help="size gear drives")
     gear_commands = gear.add_subparsers(dest="gear_command", required=True)
 
@@ -754,6 +778,24 @@ def _design_command(arguments: argparse.Namespace) -> dict[str, object]:
     return service.list_designs()
 
 
+def _screening_command(arguments: argparse.Namespace) -> dict[str, object]:
+    runtime = _runtime(arguments.workspace)
+    service = _design_service(runtime, require_freecad=False)
+    if arguments.screening_command == "status":
+        return service.screening_status(arguments.design_id)
+    document = _json_argument(
+        arguments.screening_json, arguments.screening_file, "screening"
+    )
+    query = _json_argument(arguments.query_json, arguments.query_file, "query")
+    load_case = _json_argument(arguments.load_case_json, None, "load case")
+    return service.record_screening(
+        design_id=arguments.design_id,
+        document=document,
+        query=query,
+        load_case=load_case or None,
+    )
+
+
 def _family_command(arguments: argparse.Namespace) -> dict[str, object]:
     runtime = _runtime(arguments.workspace)
     service = _family_service(runtime)
@@ -826,6 +868,8 @@ def main() -> None:
             )
         elif arguments.command == "design":
             result = _design_command(arguments)
+        elif arguments.command == "screening":
+            result = _screening_command(arguments)
         elif arguments.command == "gear":
             result = (
                 _gear_build_command(arguments)

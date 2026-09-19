@@ -418,3 +418,133 @@ def test_knowledge_bootstrap_reports_the_local_backend(
     assert result["knowledge_store"]["applied"] == ["001_knowledge.sql"]
     assert result["neo4j"] == {"status": "not_configured"}
     assert "postgresql" not in result
+
+
+def _screening_json() -> str:
+    return json.dumps(
+        {
+            "schema_version": "SurrogateScreening/v1",
+            "screened_sha256": "b" * 64,
+            "model": {
+                "name": "sfem-mesh-gnn",
+                "version": "0.1.0",
+                "sha256": "c" * 64,
+            },
+            "coverage": 0.9,
+            "calibration": {
+                "method": "cw_adaptive_split_conformal",
+                "set_size": 2400,
+                "set_sha256": "d" * 64,
+            },
+            "domain": {"material_class": "linear_elastic"},
+            "predictions": [
+                {
+                    "quantity": "von_mises_peak",
+                    "lower": 142.0,
+                    "upper": 198.0,
+                    "units": "MPa",
+                }
+            ],
+            "assumptions": ["linear elastic, small displacement"],
+            "limitations": ["screening estimate, not a strength certification"],
+            "attestation": "screening_estimate",
+        }
+    )
+
+
+def test_screening_record_and_status_round_trip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace = _workspace(tmp_path)
+    _seed_design(workspace, "carrier", "Carrier")
+
+    code, recorded = _run(
+        monkeypatch,
+        capsys,
+        "screening",
+        "record",
+        "--workspace",
+        str(workspace),
+        "--design-id",
+        "carrier",
+        "--screening-json",
+        _screening_json(),
+        "--query-json",
+        '{"material_class": "linear_elastic"}',
+    )
+
+    assert code == 0
+    assert recorded["status"] == "recorded"
+
+    code, status = _run(
+        monkeypatch,
+        capsys,
+        "screening",
+        "status",
+        "--workspace",
+        str(workspace),
+        "--design-id",
+        "carrier",
+    )
+
+    assert code == 0
+    assert status["schema_version"] == "DesignScreeningStatus/v1"
+    assert status["gates_completion"] is False
+
+
+def test_screening_record_refuses_an_out_of_domain_query(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace = _workspace(tmp_path)
+    _seed_design(workspace, "carrier", "Carrier")
+
+    code, recorded = _run(
+        monkeypatch,
+        capsys,
+        "screening",
+        "record",
+        "--workspace",
+        str(workspace),
+        "--design-id",
+        "carrier",
+        "--screening-json",
+        _screening_json(),
+        "--query-json",
+        '{"material_class": "elastoplastic"}',
+    )
+
+    assert code == 0
+    assert recorded["status"] == "refused"
+    assert recorded["document"] is None
+    assert "material_class" in str(recorded["warning"])
+
+
+def test_screening_record_reports_a_malformed_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace = _workspace(tmp_path)
+    _seed_design(workspace, "carrier", "Carrier")
+
+    code, result = _run(
+        monkeypatch,
+        capsys,
+        "screening",
+        "record",
+        "--workspace",
+        str(workspace),
+        "--design-id",
+        "carrier",
+        "--screening-json",
+        '{"schema_version": "SurrogateScreening/v1"}',
+        "--query-json",
+        "{}",
+    )
+
+    assert code == 3
+    assert result["code"] == "SURROGATE_SCREENING_INVALID"

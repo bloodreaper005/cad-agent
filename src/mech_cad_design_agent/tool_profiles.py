@@ -20,6 +20,8 @@ DESIGN_TOOL_NAMES = frozenset(
         "design_record_result",
         "design_mistakes",
         "design_gear_size",
+        "design_screening_record",
+        "design_screening_status",
         "design_confirm",
         "design_lesson_decide",
         "standard_part_providers_get",

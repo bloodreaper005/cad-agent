@@ -175,6 +175,7 @@ def test_sdist_has_strict_public_release_contents(
         "docs/ENGINEER_LEARNING_PLAYBOOK.md",
         "docs/FREECAD_GUI_MCP_INTEGRATION.md",
         "docs/OPENCODE_INTEGRATION.md",
+        "docs/SURROGATE_SCREENING.md",
         "docs/WINDOWS_RELEASE_ACCEPTANCE.md",
         "examples/product_families/example-family.json",
     }

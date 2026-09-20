@@ -9,7 +9,10 @@ validation, correction, final confirmation, and reusable Design Lessons.
 
 Nothing here guesses a number. Sizing follows published standards, the result
 carries its own assumptions and limitations, and a finished model is confirmed
-by a process the agent cannot reach or forge.
+by a process the agent cannot reach or forge. A learned surrogate may offer a
+fast screening estimate, but only as a calibrated interval with declared
+coverage that is refused outside its fitted domain and can never gate
+completion.
 
 The package provides the `mech-cad-design` CLI and
 `mech-cad-design-mcp` server. A compatible coding agent performs the design
@@ -55,6 +58,15 @@ User request
   rolling and journal bearings, gears, welds, clutches, brakes and belts. Pure
   standard library, with every shipped constant checked against an independent
   anchor and every curve fit marked as one.
+- Record a surrogate screening estimate produced outside this package, as a
+  calibrated interval with its coverage, calibration provenance and declared
+  training domain. An estimate whose query falls outside that domain is refused
+  and the refusal is kept. Screening never gates completion and never counts as
+  a passed validation check; see
+  [Surrogate screening](docs/SURROGATE_SCREENING.md).
+- Test a screening interval against the closed-form `mechanics` result for the
+  same load case, so a miscalibrated surrogate is caught by the analytical
+  answer rather than trusted over it.
 - Validate geometry, dimensions, placements, interfaces, assemblies,
   fasteners, BOM consistency, and visual evidence.
 - Bind completion to the exact FCStd SHA-256 and passed JSON, Markdown, and PNG
@@ -86,6 +98,8 @@ The default `design` surface contains the complete design flow:
 - `design_record_result`
 - `design_mistakes`
 - `design_gear_size`
+- `design_screening_record`
+- `design_screening_status`
 - `design_confirm`
 - `design_lesson_decide`
 - `standard_part_providers_get`
@@ -186,6 +200,11 @@ mech-cad-design gear size --power-kw 7.5 --pinion-rpm 1450 --gear-rpm 480 \
   --pinion-material 20MnCr5_carburised_G2 --gear-material 20MnCr5_carburised_G2 \
   --duty moderate --life-hours 20000 --safety-factor 1.5 [--out sizing.json]
 
+mech-cad-design screening record --workspace W --design-id ID \
+  --screening-file screening.json \
+  --query-json '{"material_class": "linear_elastic"}'
+mech-cad-design screening status --workspace W --design-id ID
+
 mech-cad-design family start --workspace W --onboarding-id OB \
   --family-id F --family-name N [--alias A]
 mech-cad-design family analyze --workspace W --onboarding-id OB --analysis-file P
@@ -233,12 +252,16 @@ optional relationship projection is wanted.
 - A passed validation report proves only the checks that ran against one exact
   model revision. It is not FEA, manufacturing release, safety certification,
   or legal standards certification.
+- A surrogate screening estimate is a learned prediction with declared
+  coverage, not an analysis. It is not FEA either, it proves nothing about the
+  model, and no screening result can complete, block, or confirm a design.
 - Final engineering responsibility remains with the user or an authorized
   engineer.
 
 ## Documentation
 
 - [Architecture and trust boundaries](docs/ARCHITECTURE.md)
+- [Surrogate screening](docs/SURROGATE_SCREENING.md)
 - [FreeCAD GUI MCP integration](docs/FREECAD_GUI_MCP_INTEGRATION.md)
 - [Engineer learning playbook](docs/ENGINEER_LEARNING_PLAYBOOK.md)
 - [Database deployment](docs/DATABASE_DEPLOYMENT.md)

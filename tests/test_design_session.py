@@ -600,3 +600,228 @@ def test_new_design_rejects_a_seed_creator_that_writes_geometry(
             proposal_summary="p",
             approval_text="yes",
         )
+
+
+def _screening_document(**overrides: object) -> dict[str, object]:
+    document: dict[str, object] = {
+        "schema_version": "SurrogateScreening/v1",
+        "screened_sha256": "b" * 64,
+        "model": {"name": "sfem-mesh-gnn", "version": "0.1.0", "sha256": "c" * 64},
+        "coverage": 0.9,
+        "calibration": {
+            "method": "cw_adaptive_split_conformal",
+            "set_size": 2400,
+            "set_sha256": "d" * 64,
+        },
+        "domain": {"material_class": "linear_elastic"},
+        "predictions": [
+            {
+                "quantity": "von_mises_peak",
+                "lower": 142.0,
+                "upper": 198.0,
+                "units": "MPa",
+            }
+        ],
+        "assumptions": ["linear elastic, small displacement"],
+        "limitations": ["screening estimate, not a strength certification"],
+        "attestation": "screening_estimate",
+    }
+    document.update(overrides)
+    return document
+
+
+def test_screening_records_against_the_current_model_bytes(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    result = _start(service)
+    model = Path(str(result["model_path"]))
+
+    recorded = service.record_screening(
+        design_id="basketball-carrier",
+        document=_screening_document(),
+        query={"material_class": "linear_elastic"},
+    )
+
+    assert recorded["status"] == "recorded"
+    assert recorded["model_sha256"] == file_sha256(model)
+    assert recorded["document"]["attestation"] == "screening_estimate"
+    assert recorded["warning"] is None
+
+
+def test_an_out_of_domain_query_is_refused_but_still_recorded(tmp_path: Path) -> None:
+    """The refusal is a fact a later reader needs as much as a number would be."""
+    service = _service(tmp_path)
+    _start(service)
+
+    recorded = service.record_screening(
+        design_id="basketball-carrier",
+        document=_screening_document(),
+        query={"material_class": "elastoplastic"},
+    )
+
+    assert recorded["status"] == "refused"
+    assert recorded["document"] is None
+    assert "material_class" in str(recorded["warning"])
+    assert recorded["domain"]["status"] == "out_of_domain"
+
+
+def test_a_missing_query_key_refuses_rather_than_passing(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    _start(service)
+
+    recorded = service.record_screening(
+        design_id="basketball-carrier", document=_screening_document(), query={}
+    )
+
+    assert recorded["status"] == "refused"
+
+
+def test_a_bad_screening_estimate_never_blocks_completion(tmp_path: Path) -> None:
+    """The load-bearing separation: screening is triage, never a gate.
+
+    A catastrophically wrong estimate must leave model_status, the validation
+    gate and final confirmation exactly where they were. If this test fails the
+    separation has been lost, and the subsystem has become evidence.
+    """
+    service = _service(tmp_path)
+    result = _start(service)
+    model = Path(str(result["model_path"]))
+    model.write_bytes(_fcstd(object_name="Carrier"))
+
+    service.record_screening(
+        design_id="basketball-carrier",
+        document=_screening_document(
+            predictions=[
+                {
+                    "quantity": "von_mises_peak",
+                    "lower": 9.0e5,
+                    "upper": 1.0e6,
+                    "units": "MPa",
+                }
+            ]
+        ),
+        query={"material_class": "linear_elastic"},
+    )
+
+    report, evidence = _write_validation(
+        model.parent, working_sha256=file_sha256(model)
+    )
+    recorded = service.record_result(
+        design_id="basketball-carrier",
+        model_path=str(model),
+        validation_report_path=str(report),
+        evidence_paths=[str(path) for path in evidence],
+    )
+
+    assert recorded["status"] == "completed"
+    state = service.get("basketball-carrier")
+    assert state["model_status"] == "completed"
+    assert state["validation"]["status"] == "passed"
+    assert state["screening"]["status"] == "recorded"
+
+    confirmed = service.confirm(
+        design_id="basketball-carrier", confirmation_text="yes"
+    )
+    assert confirmed["confirmation_state"] == "APPROVE"
+
+
+def test_a_changed_model_invalidates_a_recorded_screening(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    result = _start(service)
+    model = Path(str(result["model_path"]))
+
+    service.record_screening(
+        design_id="basketball-carrier",
+        document=_screening_document(),
+        query={"material_class": "linear_elastic"},
+    )
+    model.write_bytes(_fcstd(object_name="Revised"))
+
+    state = service.get("basketball-carrier")
+    assert state["screening"]["status"] == "invalidated"
+    assert "model changed" in str(state["screening"]["warning"])
+
+
+def test_a_session_written_before_screening_existed_still_loads(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    result = _start(service)
+    design_json = Path(str(result["design_root"])) / "design.json"
+    state = json.loads(design_json.read_text(encoding="utf-8"))
+    del state["screening"]
+    design_json.write_text(json.dumps(state), encoding="utf-8")
+
+    loaded = service.get("basketball-carrier")
+    assert loaded["screening"]["status"] == "not_executed"
+
+
+def test_screening_status_reports_that_it_gates_nothing(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    _start(service)
+    service.record_screening(
+        design_id="basketball-carrier",
+        document=_screening_document(),
+        query={"material_class": "linear_elastic"},
+    )
+
+    status = service.screening_status("basketball-carrier")
+    assert status["schema_version"] == "DesignScreeningStatus/v1"
+    assert status["status"] == "recorded"
+    assert status["gates_completion"] is False
+
+
+def test_the_crosscheck_runs_when_a_closed_form_load_case_is_given(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    _start(service)
+
+    recorded = service.record_screening(
+        design_id="basketball-carrier",
+        document=_screening_document(),
+        query={"material_class": "linear_elastic"},
+        load_case={"kind": "axial", "force_n": 17000.0, "area_mm2": 100.0},
+    )
+
+    assert recorded["crosscheck"]["status"] == "interval_contains"
+    assert recorded["crosscheck"]["closed_form_mpa"] == pytest.approx(170.0)
+
+
+def test_a_screening_image_cannot_serve_as_validation_evidence(
+    tmp_path: Path,
+) -> None:
+    """The render is a real PNG in the session; only its origin disqualifies it."""
+    service = _service(tmp_path)
+    result = _start(service)
+    model = Path(str(result["model_path"]))
+    model.write_bytes(_fcstd(object_name="Carrier"))
+    root = model.parent
+    (root / "screening").mkdir()
+    render = root / "screening" / "von_mises.png"
+    render.write_bytes(_png_bytes())
+
+    service.record_screening(
+        design_id="basketball-carrier",
+        document=_screening_document(
+            fields=[
+                {
+                    "quantity": "von_mises",
+                    "mesh_sha256": "e" * 64,
+                    "values_relative_path": "screening/von_mises.json",
+                    "interval_relative_path": "screening/von_mises_interval.json",
+                    "image_relative_path": "screening/von_mises.png",
+                    "image_sha256": file_sha256(render),
+                }
+            ]
+        ),
+        query={"material_class": "linear_elastic"},
+    )
+
+    report, evidence = _write_validation(root, working_sha256=file_sha256(model))
+    with pytest.raises(ValueError, match="screening image cannot serve"):
+        service.record_result(
+            design_id="basketball-carrier",
+            model_path=str(model),
+            validation_report_path=str(report),
+            evidence_paths=[str(evidence[0]), str(render)],
+        )

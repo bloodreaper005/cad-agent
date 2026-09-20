@@ -297,6 +297,39 @@ def create_mcp(
         return _tool_call(lambda: get_design_reader().correction_summary(design_id))
 
     @registrar.tool()
+    def design_screening_record(
+        design_id: str,
+        screening_json: str,
+        query_json: str = "{}",
+        load_case_json: str = "{}",
+    ) -> str:
+        """Record a calibrated surrogate screening estimate against this design.
+
+        Triage, not evidence. The estimate never gates completion and never
+        counts as a passed validation check. An estimate whose declared
+        training domain does not contain `query_json` is refused rather than
+        stored as usable, and the refusal is kept with the bounds it violated.
+        """
+        screening = _object(screening_json, "screening_json")
+        query = _object(query_json, "query_json")
+        load_case = _object(load_case_json, "load_case_json")
+        return _tool_call(
+            lambda: get_design_reader().record_screening(
+                design_id=design_id,
+                document=screening,
+                query=query,
+                load_case=load_case or None,
+            )
+        )
+
+    @registrar.tool()
+    def design_screening_status(design_id: str) -> str:
+        """Report this design's surrogate screening estimate, if one was recorded."""
+        return _tool_call(
+            lambda: get_design_reader().screening_status(design_id)
+        )
+
+    @registrar.tool()
     def design_gear_size(
         power_kw: float,
         pinion_speed_rpm: float,

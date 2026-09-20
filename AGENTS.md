@@ -7,6 +7,7 @@
 - Use the `mech-cad-design` MCP for design state and knowledge operations and the configured `freecad` MCP for interactive inspection and CAD edits.
 - The agent provides design and validation evidence. It does not independently certify strength, safety, manufacturability, or standards compliance.
 - Gear-drive sizing (`design_gear_size`, `mech-cad-design gear size`) computes bending and contact stress from AGMA/ISO relations, which is a deliberate expansion of that boundary into preliminary sizing evidence. It follows the same rule as validation: a result documents the checks it ran and the assumptions it made, and is never FEA, a strength certification, or manufacturing release. Every result states what it did not evaluate.
+- Surrogate screening (`design_screening_record`, `mech-cad-design screening record`) records a learned estimate produced outside this package. It is a different kind of thing from sizing and validation, and is handled under "Surrogate screening" below. Never present a screening interval as an analysis result, and never treat one as a reason to complete, block, or confirm a design.
 
 ## Normal design process
 
@@ -43,6 +44,14 @@
 - Build a validation specification from the accepted requirements. Check recompute state, shape validity, solids, positive volume, dimensions, placements, required interfaces, provenance, BOM consistency, and applicable interference or fastener contracts.
 - Inspect both machine-readable evidence and the generated validation view. Repair and rerun safe failures automatically.
 - A passed report documents the checks performed; it is not FEA, manufacturing release, certification, or legal standards compliance.
+
+## Surrogate screening
+
+- Screening is triage: a fast learned estimate used to aim expensive checks at the right candidate. Run it before substantive modeling if it is available, and never in place of validation.
+- Record every estimate through `design_screening_record` with the query describing the geometry and load it applies to. Report the interval and its coverage, never a single number taken from the middle of it.
+- An out-of-domain refusal is a result, not a failure. Report it as the surrogate declining to answer and continue with the ordinary process; do not restate the query to get past the gate.
+- When the load case reduces to a case `mechanics` covers, pass it so the closed-form anchor runs. An `interval_excludes` result means the surrogate is miscalibrated on that case: keep the closed-form value, say so, and do not repeat the estimate as if it were sound.
+- Screening never changes `model_status`, never satisfies a validation check, and never justifies confirmation. A design that screens badly still completes on passed validation, and one that screens well still requires it.
 
 ## Learning from mistakes
 

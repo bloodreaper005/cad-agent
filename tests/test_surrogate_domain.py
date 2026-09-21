@@ -184,3 +184,33 @@ def test_a_decision_serializes_with_its_schema() -> None:
     assert result["schema_version"] == DOMAIN_DECISION_SCHEMA
     assert result["status"] == "out_of_domain"
     assert result["violations"][0]["key"] == "load_case"
+
+
+def test_every_violation_says_what_would_have_to_change() -> None:
+    """Naming the bound is honest; naming the remedy is actionable.
+
+    A reader seeing "poisson_ratio: not_equal" still has to work out whether
+    the query is wrong or the surrogate is, and those have opposite fixes.
+    """
+    decision = evaluate_domain(
+        _envelope(),
+        _query(
+            material_class="elastoplastic",
+            load_case="thermal",
+            characteristic_length_mm=1000.0,
+        ),
+    )
+
+    assert decision.status == "out_of_domain"
+    for violation in decision.violations:
+        assert violation["remedy"]
+        assert "refit" in violation["remedy"] or "state it" in violation["remedy"]
+
+
+def test_a_missing_bound_is_not_a_bound_that_passed() -> None:
+    query = _query()
+    del query["characteristic_length_mm"]
+
+    decision = evaluate_domain(_envelope(), query)
+
+    assert "does not state this quantity" in decision.violations[0]["remedy"]

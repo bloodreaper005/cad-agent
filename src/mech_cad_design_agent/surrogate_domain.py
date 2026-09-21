@@ -40,6 +40,38 @@ def _plain(value: object) -> object:
     return value
 
 
+# What a person would have to do about each kind of refusal. Naming the
+# violated bound is honest but not actionable: "poisson_ratio: not_equal"
+# leaves the reader to work out whether the query is wrong or the surrogate is,
+# and those have opposite remedies.
+_REMEDIES = {
+    "missing": (
+        "the query does not state this quantity; measure it and state it, "
+        "because a bound nobody answered is not a bound that passed"
+    ),
+    "not_equal": (
+        "the surrogate was not fitted at this value; screen a design that "
+        "matches it, or refit the surrogate with this value in its sweep"
+    ),
+    "not_in_set": (
+        "the surrogate was not fitted for this case; screen one of the fitted "
+        "cases, or refit with this case in its sweep"
+    ),
+    "below_minimum": (
+        "below the fitted range; screen a design inside the range, or refit "
+        "over a range that reaches this value"
+    ),
+    "above_maximum": (
+        "above the fitted range; screen a design inside the range, or refit "
+        "over a range that reaches this value"
+    ),
+    "not_a_finite_number": (
+        "the query value is not a finite number, so it cannot be compared "
+        "against a numeric bound"
+    ),
+}
+
+
 def _violation(
     key: str, reason: str, expected: object, actual: object
 ) -> dict[str, Any]:
@@ -48,6 +80,7 @@ def _violation(
         "reason": reason,
         "expected": _plain(expected),
         "actual": _plain(actual),
+        "remedy": _REMEDIES.get(reason, "resolve the violated bound"),
     }
 
 

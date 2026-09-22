@@ -171,8 +171,41 @@ and what would have to change.
 | Screening cannot affect `model_status` or `design_confirm` | passed |
 | Screening image refused as validation evidence | passed |
 | Closed-form crosscheck against `mechanics` | passed for axial, round cantilever bending, round torsion |
-| Deployed coverage against the solver | see below |
+| Deployed coverage against the solver | measured; see below |
 | Per-node field rendering | **not available**; the model has a graph-level head |
+| `spring` family | **refused**; its weights were fitted on geometry real CAD cannot produce |
+
+### Deployed coverage
+
+A conformal band is a claim about a population, and the one it was measured on
+is not the one a user belongs to. The bands above come from held-out samples
+that arrived through the training sweep carrying boundary conditions the sweep
+itself tagged. A user arrives with a STEP file and no tags.
+
+Measured on 600 fresh parts, 100 per family, screened through the loaded server
+and compared against the solver:
+
+| Family | 2026-09-21 | 2026-09-22 |
+| --- | --- | --- |
+| bracket | 0.46 | 0.83 |
+| flange | 0.00 | 0.96 |
+| pulley | 0.59 | 0.94 |
+| stepped_shaft | 0.77 | 0.93 |
+| welded_t | 0.67 | 0.90 |
+| spring | 0.00 | refused |
+| **overall** | **0.415** | **0.760** |
+
+The first figure was not noise — the standard error at n=600 is 0.012. Two
+separate defects caused it, both of the same shape: two code paths that were
+supposed to agree and quietly did not, neither producing a crash or an
+implausible number. A spring returned a confident, narrow, calibrated-looking
+interval a hundred times below the solved value.
+
+This is recorded here because it bears directly on what a stored screening
+record means. A coverage figure this project stores is a claim the surrogate
+makes about itself, and this project cannot verify it — which is precisely why
+`design_screening_record` binds it to a model digest and a calibration set
+digest, and why a screening result gates nothing.
 
 The surrogate provides screening evidence. It does not certify strength,
 manufacturability, or standards compliance, and a screening interval is never

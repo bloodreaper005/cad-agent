@@ -187,13 +187,13 @@ and compared against the solver:
 
 | Family | 2026-09-21 | 2026-09-22 |
 | --- | --- | --- |
-| bracket | 0.46 | 0.83 |
-| flange | 0.00 | 0.96 |
+| bracket | 0.46 | 0.82 |
+| flange | 0.00 | 0.97 |
 | pulley | 0.59 | 0.94 |
 | stepped_shaft | 0.77 | 0.93 |
 | welded_t | 0.67 | 0.90 |
-| spring | 0.00 | refused |
-| **overall** | **0.415** | **0.760** |
+| spring | 0.00 | refused, 100/100 |
+| **overall** | **0.415** | **0.912** (n=500) |
 
 The first figure was not noise — the standard error at n=600 is 0.012. Two
 separate defects caused it, both of the same shape: two code paths that were
